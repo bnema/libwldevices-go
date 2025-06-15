@@ -8,6 +8,8 @@
 //
 // • wlr-virtual-pointer-unstable-v1: Mouse input injection (motion, buttons, scroll)
 // • virtual-keyboard-unstable-v1: Keyboard input injection (keys, modifiers, text)
+// • pointer-constraints-unstable-v1: Exclusive pointer capture and constraints
+// • keyboard-shortcuts-inhibit-unstable-v1: Keyboard shortcut inhibition
 //
 // # Compositor Compatibility
 //
