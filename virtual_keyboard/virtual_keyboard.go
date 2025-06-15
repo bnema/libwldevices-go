@@ -1,11 +1,31 @@
 // Package virtual_keyboard provides Go bindings for the virtual-keyboard-unstable-v1 Wayland protocol.
 //
-// This protocol allows clients to emulate a physical keyboard device. The virtual keyboard
+// This protocol allows clients to emulate a physical keyboard device, enabling keyboard input
+// injection into Wayland compositors without requiring root privileges. The virtual keyboard
 // provides an application with requests which emulate the behaviour of a physical keyboard.
-// This interface can be used by clients on its own to provide raw input events, or it can
-// accompany the input method protocol.
 //
-// Protocol specification: virtual-keyboard-unstable-v1
+// # Basic Usage
+//
+//	// Create manager and keyboard
+//	manager := NewVirtualKeyboardManager(display, registry)
+//	keyboard := manager.CreateVirtualKeyboard(seat)
+//
+//	// Type text
+//	keyboard.TypeString("Hello, World!")
+//
+//	// Press individual keys
+//	keyboard.Key(KEY_ENTER, KEY_STATE_PRESSED)
+//	keyboard.Key(KEY_ENTER, KEY_STATE_RELEASED)
+//
+//	// Use modifiers
+//	keyboard.ModifierPress(MOD_CTRL)
+//	keyboard.Key(KEY_C, KEY_STATE_PRESSED)
+//	keyboard.ModifierRelease(MOD_CTRL)
+//
+// # Protocol Specification
+//
+// Based on virtual-keyboard-unstable-v1 from Wayland protocols.
+// Supported by most Wayland compositors including Hyprland and Sway.
 package virtual_keyboard
 
 import (

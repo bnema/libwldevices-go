@@ -1,9 +1,30 @@
 // Package virtual_pointer provides Go bindings for the wlr-virtual-pointer-unstable-v1 Wayland protocol.
 //
-// This protocol allows clients to emulate a physical pointer device. The requests are mostly
-// mirror opposites of those specified in wl_pointer.
+// This protocol allows clients to emulate a physical pointer device, enabling mouse input injection
+// into Wayland compositors without requiring root privileges. The requests are mostly mirror
+// opposites of those specified in wl_pointer.
 //
-// Protocol specification: wlr-virtual-pointer-unstable-v1
+// # Basic Usage
+//
+//	// Create manager and pointer
+//	manager := NewVirtualPointerManager(display, registry)
+//	pointer := manager.CreateVirtualPointer(seat)
+//
+//	// Move mouse cursor
+//	pointer.Motion(timestamp, 10.0, 5.0)
+//	pointer.Frame()
+//
+//	// Click buttons
+//	pointer.LeftClick()
+//	pointer.RightClick()
+//
+//	// Scroll
+//	pointer.ScrollVertical(-5.0)
+//
+// # Protocol Specification
+//
+// Based on wlr-virtual-pointer-unstable-v1 from wlroots project.
+// Supported by Hyprland, Sway, and other wlroots-based compositors.
 package virtual_pointer
 
 import (
