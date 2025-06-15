@@ -10,8 +10,9 @@
 This library provides **complete, working implementations** for:
 - **Virtual Pointer** (`zwlr_virtual_pointer_v1`): Mouse movement, clicks, and scrolling
 - **Virtual Keyboard** (`zwp_virtual_keyboard_v1`): Keyboard input and key combinations
+- **Pointer Constraints** (`zwp_pointer_constraints_v1`): Lock or confine pointer motion
 
-Built on top of [neurlang/wayland](https://github.com/neurlang/wayland) client library, these bindings enable applications to inject input events directly into Wayland compositors.
+Built on top of [neurlang/wayland](https://github.com/neurlang/wayland) client library, these bindings enable applications to inject input events directly into Wayland compositors and control pointer behavior.
 
 ### Use Cases
 - **Remote desktop applications** - Forward input from remote clients
@@ -19,6 +20,8 @@ Built on top of [neurlang/wayland](https://github.com/neurlang/wayland) client l
 - **Accessibility tools** - Alternative input methods
 - **Screen sharing applications** - Multi-user input handling
 - **Gaming and simulation** - Synthetic input generation
+- **FPS games** - Lock pointer for mouse-look controls
+- **Creative applications** - Confine pointer to canvas area
 
 ## Features
 
@@ -38,6 +41,14 @@ Built on top of [neurlang/wayland](https://github.com/neurlang/wayland) client l
 - Numeric keypad support
 - Key combinations and shortcuts
 - Modifier state management
+
+### Pointer Constraints
+- Lock pointer to current position
+- Confine pointer to specified region
+- Oneshot and persistent lifetime modes
+- Cursor position hints for unlock
+- Event notifications for constraint state changes
+- Region updates while constrained
 
 ## Installation
 
@@ -137,6 +148,52 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
+}
+```
+
+### Pointer Constraints Example
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    
+    "github.com/bnema/wayland-virtual-input-go/pointer_constraints"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Create pointer constraints manager
+    manager, err := pointer_constraints.NewPointerConstraintsManager(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer manager.Close()
+    
+    // Get surface and pointer from your window toolkit
+    surface := getWlSurface() // From your application window
+    pointer := getWlPointer() // From seat capabilities
+    
+    // Lock pointer for FPS-style controls
+    locked, err := manager.LockPointer(surface, pointer, nil, pointer_constraints.LifetimePersistent)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer locked.Close()
+    
+    // Set cursor position hint for unlock
+    locked.SetCursorPositionHint(400.0, 300.0)
+    
+    // Or confine pointer to a region
+    region := createRegion(0, 0, 800, 600) // Create region bounds
+    confined, err := manager.ConfinePointer(surface, pointer, region, pointer_constraints.LifetimeOneshot)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer confined.Close()
 }
 ```
 
