@@ -2,7 +2,9 @@ module github.com/bnema/wayland-virtual-input-go
 
 go 1.21
 
+require github.com/neurlang/wayland v0.2.1
+
 require (
-	// No external dependencies required for the current stub implementation
-	// In a real implementation, you would add Wayland client library dependencies here
+	github.com/yalue/native_endian v1.0.2 // indirect
+	golang.org/x/sys v0.21.0 // indirect
 )
