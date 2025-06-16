@@ -16,18 +16,11 @@ type Client struct {
 	context    *wl.Context
 	
 	// Protocol globals
-<<<<<<< HEAD
-	pointerManager   uint32
-	keyboardManager  uint32
-	
-	mu sync.Mutex
-=======
 	pointerManager     uint32
 	keyboardManager    uint32
 	constraintsManager uint32
 
 	mu      sync.Mutex
->>>>>>> 82885fa (feat: add pointer constraints protocol implementation)
 	globals map[uint32]string
 }
 
