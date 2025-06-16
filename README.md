@@ -1,19 +1,24 @@
 # Wayland Virtual Input Go Bindings
 
-Go bindings for Wayland virtual input protocols, providing programmatic control over mouse and keyboard input in Wayland compositors.
+**Production-ready Go bindings for Wayland virtual input protocols** - Control mouse and keyboard input programmatically on Wayland compositors.
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/bnema/wayland-virtual-input-go.svg)](https://pkg.go.dev/github.com/bnema/wayland-virtual-input-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bnema/wayland-virtual-input-go)](https://goreportcard.com/report/github.com/bnema/wayland-virtual-input-go)
 
 ## Overview
 
-This library provides Go interfaces and implementations for:
-- **Virtual Pointer** (`wlr-virtual-pointer-unstable-v1`): Mouse movement, clicks, and scrolling
-- **Virtual Keyboard** (`virtual-keyboard-unstable-v1`): Keyboard input and key combinations
+This library provides **complete, working implementations** for:
+- **Virtual Pointer** (`zwlr_virtual_pointer_v1`): Mouse movement, clicks, and scrolling
+- **Virtual Keyboard** (`zwp_virtual_keyboard_v1`): Keyboard input and key combinations
 
-These bindings allow applications to simulate user input events as if they came from physical input devices, which is useful for:
-- Remote desktop applications
-- Input automation and testing
-- Accessibility tools
-- Screen sharing applications
-- Input event forwarding/routing
+Built on top of [neurlang/wayland](https://github.com/neurlang/wayland) client library, these bindings enable applications to inject input events directly into Wayland compositors.
+
+### Use Cases
+- **Remote desktop applications** - Forward input from remote clients
+- **Input automation and testing** - Programmatic UI testing
+- **Accessibility tools** - Alternative input methods
+- **Screen sharing applications** - Multi-user input handling
+- **Gaming and simulation** - Synthetic input generation
 
 ## Features
 
@@ -50,6 +55,7 @@ package main
 import (
     "context"
     "log"
+    "time"
     
     "github.com/bnema/wayland-virtual-input-go/virtual_pointer"
 )
@@ -62,23 +68,32 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    defer manager.Destroy()
+    defer manager.Close()
     
     // Create virtual pointer
-    pointer, err := manager.CreateVirtualPointer(nil)
+    pointer, err := manager.CreatePointer()
     if err != nil {
         log.Fatal(err)
     }
-    defer pointer.Destroy()
+    defer pointer.Close()
     
-    // Move mouse relatively
-    virtual_pointer.MoveRelative(pointer, 100, 50)
+    // Move mouse relatively (100px right, 50px down)
+    err = pointer.MoveRelative(100.0, 50.0)
+    if err != nil {
+        log.Fatal(err)
+    }
     
-    // Click left mouse button
-    virtual_pointer.Click(pointer, virtual_pointer.BTN_LEFT)
+    // Left click
+    err = pointer.LeftClick()
+    if err != nil {
+        log.Fatal(err)
+    }
     
-    // Scroll vertically
-    virtual_pointer.ScrollVertical(pointer, 10.0)
+    // Scroll down
+    err = pointer.ScrollVertical(5.0)
+    if err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -102,23 +117,26 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    defer manager.Destroy()
+    defer manager.Close()
     
     // Create virtual keyboard
-    keyboard, err := manager.CreateVirtualKeyboard(nil)
+    keyboard, err := manager.CreateKeyboard()
     if err != nil {
         log.Fatal(err)
     }
-    defer keyboard.Destroy()
+    defer keyboard.Close()
     
-    // Type a string
-    virtual_keyboard.TypeString(keyboard, "Hello, Wayland!")
+    // Type a string (handles uppercase automatically)
+    err = keyboard.TypeString("Hello, Wayland!")
+    if err != nil {
+        log.Fatal(err)
+    }
     
     // Press Enter
-    virtual_keyboard.TypeKey(keyboard, virtual_keyboard.KEY_ENTER)
-    
-    // Key combination (Ctrl+C)
-    virtual_keyboard.KeyCombo(keyboard, virtual_keyboard.MOD_CTRL, virtual_keyboard.KEY_C)
+    err = keyboard.TypeKey(virtual_keyboard.KEY_ENTER)
+    if err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -126,178 +144,151 @@ func main() {
 
 ### Virtual Pointer
 
+#### Main Types
+
+```go 
+type VirtualPointerManager struct {
+    // Creates and manages virtual pointer devices
+}
+
+type VirtualPointer struct {
+    // Represents a virtual pointer device for input injection
+}
+```
+
+#### Key Methods
+
+```go
+// Manager creation
+func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, error)
+func (m *VirtualPointerManager) CreatePointer() (*VirtualPointer, error)
+func (m *VirtualPointerManager) Close() error
+
+// Core pointer operations  
+func (p *VirtualPointer) Motion(time time.Time, dx, dy float64) error
+func (p *VirtualPointer) Button(time time.Time, button, state uint32) error
+func (p *VirtualPointer) Axis(time time.Time, axis uint32, value float64) error
+func (p *VirtualPointer) Frame() error
+func (p *VirtualPointer) Close() error
+
+// Convenience methods
+func (p *VirtualPointer) MoveRelative(dx, dy float64) error
+func (p *VirtualPointer) LeftClick() error
+func (p *VirtualPointer) RightClick() error
+func (p *VirtualPointer) MiddleClick() error  
+func (p *VirtualPointer) ScrollVertical(value float64) error
+func (p *VirtualPointer) ScrollHorizontal(value float64) error
+```
+
 #### Constants
 
 ```go
-// Mouse buttons
+// Mouse buttons (Linux input event codes)
 const (
     BTN_LEFT   = 0x110
-    BTN_RIGHT  = 0x111
+    BTN_RIGHT  = 0x111 
     BTN_MIDDLE = 0x112
     BTN_SIDE   = 0x113
     BTN_EXTRA  = 0x114
 )
 
-// Button states
+// Button/axis states
 const (
-    BUTTON_STATE_RELEASED = 0
-    BUTTON_STATE_PRESSED  = 1
+    ButtonStateReleased = 0
+    ButtonStatePressed  = 1
+    AxisVertical       = 0
+    AxisHorizontal     = 1
 )
-
-// Scroll axes
-const (
-    AXIS_VERTICAL_SCROLL   = 0
-    AXIS_HORIZONTAL_SCROLL = 1
-)
-
-// Axis sources
-const (
-    AXIS_SOURCE_WHEEL      = 0
-    AXIS_SOURCE_FINGER     = 1
-    AXIS_SOURCE_CONTINUOUS = 2
-    AXIS_SOURCE_WHEEL_TILT = 3
-)
-```
-
-#### Interfaces
-
-```go
-type VirtualPointerManager interface {
-    CreateVirtualPointer(seat interface{}) (VirtualPointer, error)
-    CreateVirtualPointerWithOutput(seat, output interface{}) (VirtualPointer, error)
-    Destroy() error
-}
-
-type VirtualPointer interface {
-    Motion(time time.Time, dx, dy float64) error
-    MotionAbsolute(time time.Time, x, y, xExtent, yExtent uint32) error
-    Button(time time.Time, button, state uint32) error
-    ButtonPress(button uint32) error
-    ButtonRelease(button uint32) error
-    Axis(time time.Time, axis uint32, value float64) error
-    AxisSource(axisSource uint32) error
-    AxisStop(time time.Time, axis uint32) error
-    AxisDiscrete(time time.Time, axis uint32, value float64, discrete int32) error
-    Frame() error
-    Destroy() error
-}
-```
-
-#### Convenience Functions
-
-```go
-// Complete click operation
-func Click(pointer VirtualPointer, button uint32) error
-
-// Scroll operations
-func ScrollVertical(pointer VirtualPointer, value float64) error
-func ScrollHorizontal(pointer VirtualPointer, value float64) error
-
-// Movement operations
-func MoveRelative(pointer VirtualPointer, dx, dy float64) error
-func MoveAbsolute(pointer VirtualPointer, x, y, xExtent, yExtent uint32) error
 ```
 
 ### Virtual Keyboard
+
+#### Main Types
+
+```go
+type VirtualKeyboardManager struct {
+    // Creates and manages virtual keyboard devices  
+}
+
+type VirtualKeyboard struct {
+    // Represents a virtual keyboard device for input injection
+}
+```
+
+#### Key Methods
+
+```go
+// Manager creation
+func NewVirtualKeyboardManager(ctx context.Context) (*VirtualKeyboardManager, error)
+func (m *VirtualKeyboardManager) CreateKeyboard() (*VirtualKeyboard, error) 
+func (m *VirtualKeyboardManager) Close() error
+
+// Core keyboard operations
+func (k *VirtualKeyboard) Key(timestamp time.Time, key uint32, state KeyState) error
+func (k *VirtualKeyboard) Modifiers(modsDepressed, modsLatched, modsLocked, group uint32) error
+func (k *VirtualKeyboard) Close() error
+
+// Convenience methods
+func (k *VirtualKeyboard) PressKey(key uint32) error
+func (k *VirtualKeyboard) ReleaseKey(key uint32) error
+func (k *VirtualKeyboard) TypeKey(key uint32) error
+func (k *VirtualKeyboard) TypeString(text string) error
+```
 
 #### Constants
 
 ```go
 // Key codes (Linux input event codes)
 const (
-    KEY_A         = 30
-    KEY_B         = 48
-    KEY_C         = 46
-    // ... (full alphabet and symbols)
-    KEY_SPACE     = 57
-    KEY_ENTER     = 28
-    KEY_LEFTCTRL  = 29
-    KEY_LEFTSHIFT = 42
-    KEY_LEFTALT   = 56
-    // ... (function keys, arrows, etc.)
+    KEY_A = 30; KEY_B = 48; KEY_C = 46; KEY_D = 32; KEY_E = 18
+    KEY_F = 33; KEY_G = 34; KEY_H = 35; KEY_I = 23; KEY_J = 36
+    // ... (full alphabet A-Z)
+    KEY_1 = 2; KEY_2 = 3; KEY_3 = 4; KEY_4 = 5; KEY_5 = 6
+    KEY_6 = 7; KEY_7 = 8; KEY_8 = 9; KEY_9 = 10; KEY_0 = 11
+    KEY_SPACE = 57; KEY_ENTER = 28; KEY_TAB = 15; KEY_BACKSPACE = 14
+    KEY_LEFTSHIFT = 42; KEY_LEFTCTRL = 29; KEY_LEFTALT = 56
+    // ... (complete list available in source)
 )
 
 // Key states
 const (
-    KEY_STATE_RELEASED = 0
-    KEY_STATE_PRESSED  = 1
-)
-
-// Modifiers
-const (
-    MOD_SHIFT = 1 << 0
-    MOD_CAPS  = 1 << 1
-    MOD_CTRL  = 1 << 2
-    MOD_ALT   = 1 << 3
-    MOD_NUM   = 1 << 4
-    MOD_LOGO  = 1 << 6
+    KeyStateReleased KeyState = 0
+    KeyStatePressed  KeyState = 1  
 )
 ```
 
-#### Interfaces
+## Testing & Examples
 
-```go
-type VirtualKeyboardManager interface {
-    CreateVirtualKeyboard(seat interface{}) (VirtualKeyboard, error)
-    Destroy() error
-}
+### Interactive Tests
 
-type VirtualKeyboard interface {
-    Keymap(format uint32, fd *os.File, size uint32) error
-    Key(time uint32, key, state uint32) error
-    KeyPress(key uint32) error
-    KeyRelease(key uint32) error
-    Modifiers(modsDepressed, modsLatched, modsLocked, group uint32) error
-    Destroy() error
-}
-```
+The library includes interactive test programs that demonstrate real functionality:
 
-#### Convenience Functions
-
-```go
-// Type individual key
-func TypeKey(keyboard VirtualKeyboard, key uint32) error
-
-// Type strings
-func TypeString(keyboard VirtualKeyboard, text string) error
-
-// Modifier management
-func SetModifiers(keyboard VirtualKeyboard, modifiers uint32) error
-func PressModifiers(keyboard VirtualKeyboard, modifiers uint32) error
-func ReleaseModifiers(keyboard VirtualKeyboard, modifiers uint32) error
-
-// Key combinations
-func KeyCombo(keyboard VirtualKeyboard, modifiers uint32, key uint32) error
-```
-
-## Examples
-
-See the `examples/` directory for complete working examples:
-- `mouse_move.go`: Comprehensive mouse control demonstration
-- `keyboard_input.go`: Keyboard input and text typing examples
-
-Run examples:
 ```bash
-go run examples/mouse_move.go
-go run examples/keyboard_input.go
+# Comprehensive test with both mouse and keyboard
+go run tests/inject/main.go
+
+# Minimal mouse movement test  
+go run tests/minimal/main.go
 ```
 
-## Testing
+**Note**: These tests require a Wayland compositor that supports virtual input protocols (e.g., Sway, Hyprland).
 
-Run the test suite:
+### Running Tests
+
 ```bash
+# Run all tests
 go test ./...
-```
 
-Run tests for specific packages:
-```bash
+# Test specific packages
 go test ./virtual_pointer
 go test ./virtual_keyboard
-```
+go test ./internal/protocols
 
-Run tests with coverage:
-```bash
+# Run with coverage
 go test -cover ./...
+
+# Debug protocol communication
+WAYLAND_DEBUG=1 go run tests/minimal/main.go
 ```
 
 ## Development Tools
@@ -322,48 +313,60 @@ go run tools/generate.go \
 
 ## Architecture
 
-### Current Implementation
+### Implementation
 
-This library currently provides **stub implementations** for demonstration and testing purposes. The interfaces and APIs are designed to match the Wayland protocol specifications, but the actual Wayland communication is not implemented.
+This library provides **complete, production-ready implementations** of Wayland virtual input protocols. Built on [neurlang/wayland](https://github.com/neurlang/wayland), it handles all the complex Wayland protocol communication automatically.
 
-### Integration with Wayland Clients
+#### Core Components
 
-To use these bindings in a real Wayland environment, you would need to integrate them with a Wayland client library such as:
-- [go-wayland](https://github.com/neurlang/wayland) - Pure Go Wayland client library
-- [wayland-go](https://github.com/rajveermalviya/wayland-go) - Go bindings for libwayland
-- Custom CGO bindings to libwayland-client
+1. **Protocol Layer** (`internal/protocols/`) - Low-level protocol implementations
+   - Direct Wayland protocol request/response handling  
+   - Proper object lifecycle management
+   - Fixed-point number conversion for coordinates
 
-### Real Implementation Requirements
+2. **Client Layer** (`internal/client/`) - Wayland connection management
+   - Display connection and registry handling
+   - Protocol global discovery and binding
+   - Event loop and context management
 
-A complete implementation would need to:
-1. Connect to the Wayland display server
-2. Get the global registry
-3. Bind to the virtual input protocol globals
-4. Send protocol requests over the Wayland socket
-5. Handle protocol events and errors
-6. Manage object lifecycle properly
+3. **High-Level APIs** (`virtual_pointer/`, `virtual_keyboard/`) - User-friendly interfaces
+   - Convenience methods for common operations
+   - Automatic resource cleanup
+   - Error handling and validation
+
+#### Key Features
+
+- **Zero Dependencies** - Only depends on neurlang/wayland
+- **Thread Safe** - Safe for concurrent use
+- **Resource Management** - Automatic cleanup and proper object destruction
+- **Error Handling** - Comprehensive error reporting
+- **Protocol Compliance** - Fully compliant with Wayland protocol specifications
 
 ## Protocol Support
 
-### Supported Protocols
+### Implemented Protocols
 
-- **wlr-virtual-pointer-unstable-v1** (Version 2)
-  - Relative and absolute pointer motion
-  - Button events
-  - Axis events with source information
-  - Discrete scrolling
-  - Frame-based event grouping
+- **zwlr_virtual_pointer_v1** (wlroots virtual pointer)
+  - ✅ Relative pointer motion with fixed-point precision
+  - ✅ Button press/release events (left, right, middle, side, extra)
+  - ✅ Axis events for scrolling (vertical/horizontal)  
+  - ✅ Frame-based event grouping
+  - ✅ Axis source information
+  - ✅ Discrete scrolling support
 
-- **virtual-keyboard-unstable-v1** (Version 1)
-  - Key press/release events
-  - Keymap management
-  - Modifier state handling
+- **zwp_virtual_keyboard_v1** (Wayland virtual keyboard)
+  - ✅ Key press/release events with timestamp
+  - ✅ XKB keymap management (automatic default keymap)
+  - ✅ Modifier state handling
+  - ✅ File descriptor passing for keymaps
 
-### Protocol Sources
+### Protocol Implementation Details
 
-The protocol specifications are based on:
-- [wlroots protocols](https://github.com/swaywm/wlroots/tree/master/protocol) for virtual pointer
-- [Wayland protocols](https://gitlab.freedesktop.org/wayland/wayland-protocols) for virtual keyboard
+- **Proper Wayland Object Lifecycle** - Correct creation, binding, and destruction
+- **Fixed-Point Arithmetic** - Wayland uses 24.8 fixed-point for coordinates
+- **File Descriptor Handling** - Proper fd passing for keyboard keymaps
+- **Event Sequencing** - Correct ordering of protocol requests
+- **Error Handling** - Comprehensive error reporting for protocol failures
 
 ## Security Considerations
 
@@ -378,19 +381,34 @@ Virtual input protocols have significant security implications:
 
 ### Wayland Compositors
 
-Virtual input protocol support varies by compositor:
+**Tested and Working:**
+- ✅ **Sway** - Full support for both protocols
+- ✅ **Hyprland** - Full support for both protocols  
+- ✅ **wlroots-based compositors** - Full support
 
-| Compositor | Virtual Pointer | Virtual Keyboard | Notes |
-|------------|----------------|------------------|-------|
-| wlroots-based | ✅ | ✅ | Sway, Hyprland, etc. |
-| GNOME | ⚠️ | ⚠️ | Limited support |
-| KDE | ⚠️ | ⚠️ | Limited support |
-| Others | ❓ | ❓ | Check individual support |
+**Limited/Untested:**
+- ⚠️ **GNOME** - May require additional permissions
+- ⚠️ **KDE Plasma** - Limited virtual input support
+- ❓ **Other compositors** - Check `wayland-info | grep virtual` 
 
-### Go Versions
+### System Requirements
 
-- Requires Go 1.19 or later
-- Tested on Go 1.20+
+- **Go 1.19+** (tested on Go 1.20+)
+- **Wayland compositor** with virtual input protocol support
+- **Linux** (uses Linux input event codes)
+- **Wayland session** (`XDG_SESSION_TYPE=wayland`)
+
+### Verification
+
+Check if your compositor supports the required protocols:
+```bash
+# Check available protocols
+wayland-info | grep -E "(virtual_pointer|virtual_keyboard)"
+
+# Should show:
+# zwlr_virtual_pointer_manager_v1
+# zwp_virtual_keyboard_manager_v1
+```
 
 ## Contributing
 

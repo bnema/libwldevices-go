@@ -1,25 +1,40 @@
 // Package virtual_pointer provides Go bindings for the wlr-virtual-pointer-unstable-v1 Wayland protocol.
 //
 // This protocol allows clients to emulate a physical pointer device, enabling mouse input injection
-// into Wayland compositors without requiring root privileges. The requests are mostly mirror
-// opposites of those specified in wl_pointer.
+// into Wayland compositors without requiring root privileges. This is a complete, working 
+// implementation built on neurlang/wayland.
 //
 // # Basic Usage
 //
 //	// Create manager and pointer
-//	manager := NewVirtualPointerManager(display, registry)
-//	pointer := manager.CreateVirtualPointer(seat)
+//	ctx := context.Background()
+//	manager, err := NewVirtualPointerManager(ctx)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer manager.Close()
 //
-//	// Move mouse cursor
-//	pointer.Motion(timestamp, 10.0, 5.0)
-//	pointer.Frame()
+//	pointer, err := manager.CreatePointer()
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer pointer.Close()
+//
+//	// Move mouse cursor (relative movement)
+//	pointer.MoveRelative(100.0, 50.0)
 //
 //	// Click buttons
 //	pointer.LeftClick()
 //	pointer.RightClick()
+//	pointer.MiddleClick()
 //
-//	// Scroll
-//	pointer.ScrollVertical(-5.0)
+//	// Scroll (positive = down/right, negative = up/left)
+//	pointer.ScrollVertical(5.0)
+//	pointer.ScrollHorizontal(-3.0)
+//
+//	// Manual control with timestamps
+//	pointer.Motion(time.Now(), 10.0, 5.0)
+//	pointer.Frame()
 //
 // # Protocol Specification
 //
@@ -31,6 +46,10 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/bnema/wayland-virtual-input-go/internal/client"
+	"github.com/bnema/wayland-virtual-input-go/internal/protocols"
+	"github.com/neurlang/wayland/wl"
 )
 
 // Button constants for mouse buttons
@@ -48,13 +67,13 @@ const (
 	BUTTON_STATE_PRESSED  = 1
 )
 
-// Axis constants for scroll events
+// Axis constants (from wl_pointer)
 const (
 	AXIS_VERTICAL_SCROLL   = 0
 	AXIS_HORIZONTAL_SCROLL = 1
 )
 
-// Axis source constants
+// Axis source constants (from wl_pointer)
 const (
 	AXIS_SOURCE_WHEEL      = 0
 	AXIS_SOURCE_FINGER     = 1
@@ -62,370 +81,225 @@ const (
 	AXIS_SOURCE_WHEEL_TILT = 3
 )
 
-// VirtualPointerManager represents the zwlr_virtual_pointer_manager_v1 interface.
-// This object allows clients to create individual virtual pointer objects.
-type VirtualPointerManager interface {
-	// CreateVirtualPointer creates a new virtual pointer.
-	// The optional seat is a suggestion to the compositor.
-	CreateVirtualPointer(seat interface{}) (VirtualPointer, error)
+// ButtonState represents the state of a button
+type ButtonState uint32
 
-	// CreateVirtualPointerWithOutput creates a new virtual pointer with output mapping.
-	// The seat and output arguments are optional. If the seat argument is set, the
-	// compositor should assign the input device to the requested seat. If the output
-	// argument is set, the compositor should map the input device to the requested output.
-	CreateVirtualPointerWithOutput(seat interface{}, output interface{}) (VirtualPointer, error)
-
-	// Destroy destroys the virtual pointer manager.
-	Destroy() error
-}
-
-// VirtualPointer represents the zwlr_virtual_pointer_v1 interface.
-// This protocol allows clients to emulate a physical pointer device.
-type VirtualPointer interface {
-	// Motion sends a pointer relative motion event.
-	// The pointer has moved by a relative amount to the previous request.
-	// Values are in the global compositor space.
-	Motion(time time.Time, dx, dy float64) error
-
-	// MotionAbsolute sends a pointer absolute motion event.
-	// The pointer has moved in an absolute coordinate frame.
-	// Value of x can range from 0 to xExtent, value of y can range from 0 to yExtent.
-	MotionAbsolute(time time.Time, x, y, xExtent, yExtent uint32) error
-
-	// Button sends a button press or release event.
-	Button(time time.Time, button uint32, state uint32) error
-
-	// ButtonPress is a convenience method for pressing a button.
-	ButtonPress(button uint32) error
-
-	// ButtonRelease is a convenience method for releasing a button.
-	ButtonRelease(button uint32) error
-
-	// Axis sends a scroll and other axis event.
-	Axis(time time.Time, axis uint32, value float64) error
-
-	// AxisSource sends axis source information for scroll and other axis events.
-	AxisSource(axisSource uint32) error
-
-	// AxisStop sends a stop notification for scroll and other axes.
-	AxisStop(time time.Time, axis uint32) error
-
-	// AxisDiscrete sends discrete step information for scroll and other axes.
-	// This event allows the client to extend data normally sent using the axis
-	// event with discrete value.
-	AxisDiscrete(time time.Time, axis uint32, value float64, discrete int32) error
-
-	// Frame indicates the set of events that logically belong together.
-	// This should be called after a sequence of related pointer events.
-	Frame() error
-
-	// Destroy destroys the virtual pointer object.
-	Destroy() error
-}
-
-// VirtualPointerError represents errors that can occur with virtual pointer operations.
-type VirtualPointerError struct {
-	Code    int
-	Message string
-}
-
-func (e *VirtualPointerError) Error() string {
-	return fmt.Sprintf("virtual pointer error %d: %s", e.Code, e.Message)
-}
-
-// Error codes for virtual pointer
 const (
-	ERROR_INVALID_AXIS        = 0
-	ERROR_INVALID_AXIS_SOURCE = 1
+	ButtonStateReleased ButtonState = 0
+	ButtonStatePressed  ButtonState = 1
 )
 
-// Implementation structs (these would be implemented by the actual Wayland client library)
+// Axis represents a scroll axis
+type Axis uint32
 
-// virtualPointerManager is the concrete implementation of VirtualPointerManager.
-type virtualPointerManager struct {
-	// This would contain the actual Wayland client connection and manager object
-	// For now, we provide a stub implementation
-	connected bool
+const (
+	AxisVertical   Axis = 0
+	AxisHorizontal Axis = 1
+)
+
+// AxisSource represents the source of axis events
+type AxisSource uint32
+
+const (
+	AxisSourceWheel      AxisSource = 0
+	AxisSourceFinger     AxisSource = 1
+	AxisSourceContinuous AxisSource = 2
+	AxisSourceWheelTilt  AxisSource = 3
+)
+
+// VirtualPointerManager manages virtual pointer devices
+type VirtualPointerManager struct {
+	client  *client.Client
+	manager *protocols.VirtualPointerManager
 }
 
-// NewVirtualPointerManager creates a new virtual pointer manager.
-// In a real implementation, this would connect to the Wayland compositor
-// and bind to the zwlr_virtual_pointer_manager_v1 global.
-func NewVirtualPointerManager(ctx context.Context) (VirtualPointerManager, error) {
-	// This is a stub implementation - in reality, this would:
-	// 1. Connect to the Wayland display
-	// 2. Get the registry
-	// 3. Bind to zwlr_virtual_pointer_manager_v1
-	// 4. Return the manager object
+// VirtualPointer represents a virtual pointer device
+type VirtualPointer struct {
+	pointer *protocols.VirtualPointer
+}
+
+// floatToFixed converts a float64 to wayland fixed point
+func floatToFixed(val float64) wl.Fixed {
+	return wl.Fixed(val * 256.0)
+}
+
+// NewVirtualPointerManager creates a new virtual pointer manager
+func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, error) {
+	// Create Wayland client
+	c, err := client.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Wayland client: %w", err)
+	}
 	
-	return &virtualPointerManager{
-		connected: true,
+	// Check if virtual pointer protocol is available
+	if !c.HasVirtualPointer() {
+		c.Close()
+		return nil, fmt.Errorf("zwlr_virtual_pointer_manager_v1 not available")
+	}
+	
+	// Create the manager proxy
+	manager := protocols.NewVirtualPointerManager(c.GetContext())
+	
+	// Bind to the global
+	name := c.GetPointerManagerName()
+	err = c.GetRegistry().Bind(name, protocols.VirtualPointerManagerInterface, 1, manager)
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("failed to bind virtual pointer manager: %w", err)
+	}
+	
+	// Sync to ensure binding is complete
+	sync, err := c.GetDisplay().Sync()
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("failed to sync: %w", err)
+	}
+	
+	err = c.GetContext().RunTill(sync)
+	if err != nil {
+		c.Close()
+		return nil, fmt.Errorf("failed to wait for sync: %w", err)
+	}
+	
+	return &VirtualPointerManager{
+		client:  c,
+		manager: manager,
 	}, nil
 }
 
-func (m *virtualPointerManager) CreateVirtualPointer(seat interface{}) (VirtualPointer, error) {
-	if !m.connected {
-		return nil, &VirtualPointerError{
-			Code:    -1,
-			Message: "manager not connected",
-		}
+// CreatePointer creates a new virtual pointer device
+func (m *VirtualPointerManager) CreatePointer() (*VirtualPointer, error) {
+	// Create virtual pointer using the current seat
+	pointer, err := m.manager.CreateVirtualPointer(m.client.GetSeat())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create virtual pointer: %w", err)
 	}
-
-	// This would actually create the virtual pointer object via Wayland protocol
-	return &virtualPointer{
-		manager: m,
-		active:  true,
+	
+	return &VirtualPointer{
+		pointer: pointer,
 	}, nil
 }
 
-func (m *virtualPointerManager) CreateVirtualPointerWithOutput(seat interface{}, output interface{}) (VirtualPointer, error) {
-	if !m.connected {
-		return nil, &VirtualPointerError{
-			Code:    -1,
-			Message: "manager not connected",
-		}
-	}
-
-	// This would actually create the virtual pointer object with output mapping
-	return &virtualPointer{
-		manager: m,
-		active:  true,
-	}, nil
+// Motion sends a relative motion event
+func (p *VirtualPointer) Motion(timestamp time.Time, dx, dy float64) error {
+	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	return p.pointer.Motion(timeMs, floatToFixed(dx), floatToFixed(dy))
 }
 
-func (m *virtualPointerManager) Destroy() error {
-	if !m.connected {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "manager not connected",
-		}
-	}
+// MotionAbsolute sends an absolute motion event
+func (p *VirtualPointer) MotionAbsolute(timestamp time.Time, x, y uint32, xExtent, yExtent uint32) error {
+	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	return p.pointer.MotionAbsolute(timeMs, x, y, xExtent, yExtent)
+}
 
-	m.connected = false
+// Button sends a button press/release event
+func (p *VirtualPointer) Button(timestamp time.Time, button uint32, state ButtonState) error {
+	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	return p.pointer.Button(timeMs, button, uint32(state))
+}
+
+// Axis sends a scroll event
+func (p *VirtualPointer) Axis(timestamp time.Time, axis Axis, value float64) error {
+	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	return p.pointer.Axis(timeMs, uint32(axis), floatToFixed(value))
+}
+
+// Frame indicates the end of a pointer event sequence
+func (p *VirtualPointer) Frame() error {
+	return p.pointer.Frame()
+}
+
+// AxisSource sets the axis source for subsequent axis events
+func (p *VirtualPointer) AxisSource(source AxisSource) error {
+	return p.pointer.AxisSource(uint32(source))
+}
+
+// AxisStop sends an axis stop event
+func (p *VirtualPointer) AxisStop(timestamp time.Time, axis Axis) error {
+	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	return p.pointer.AxisStop(timeMs, uint32(axis))
+}
+
+// AxisDiscrete sends a discrete axis event
+func (p *VirtualPointer) AxisDiscrete(timestamp time.Time, axis Axis, value float64, discrete int32) error {
+	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	return p.pointer.AxisDiscrete(timeMs, uint32(axis), floatToFixed(value), discrete)
+}
+
+// Close releases the virtual pointer device
+func (p *VirtualPointer) Close() error {
+	return p.pointer.Destroy()
+}
+
+// Close releases the virtual pointer manager
+func (m *VirtualPointerManager) Close() error {
+	if m.manager != nil {
+		m.manager.Destroy()
+	}
+	if m.client != nil {
+		return m.client.Close()
+	}
 	return nil
 }
 
-// virtualPointer is the concrete implementation of VirtualPointer.
-type virtualPointer struct {
-	manager *virtualPointerManager
-	active  bool
-}
+// Convenience methods for common operations
 
-func (p *virtualPointer) Motion(time time.Time, dx, dy float64) error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	// This would send the actual motion request to the Wayland compositor
-	// For now, we just validate the parameters
-	return nil
-}
-
-func (p *virtualPointer) MotionAbsolute(time time.Time, x, y, xExtent, yExtent uint32) error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	if x > xExtent || y > yExtent {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "coordinates out of bounds",
-		}
-	}
-
-	// This would send the actual motion_absolute request to the Wayland compositor
-	return nil
-}
-
-func (p *virtualPointer) Button(time time.Time, button uint32, state uint32) error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	if state != BUTTON_STATE_PRESSED && state != BUTTON_STATE_RELEASED {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "invalid button state",
-		}
-	}
-
-	// This would send the actual button request to the Wayland compositor
-	return nil
-}
-
-func (p *virtualPointer) ButtonPress(button uint32) error {
-	return p.Button(time.Now(), button, BUTTON_STATE_PRESSED)
-}
-
-func (p *virtualPointer) ButtonRelease(button uint32) error {
-	return p.Button(time.Now(), button, BUTTON_STATE_RELEASED)
-}
-
-func (p *virtualPointer) Axis(time time.Time, axis uint32, value float64) error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	if axis != AXIS_VERTICAL_SCROLL && axis != AXIS_HORIZONTAL_SCROLL {
-		return &VirtualPointerError{
-			Code:    ERROR_INVALID_AXIS,
-			Message: "invalid axis",
-		}
-	}
-
-	// This would send the actual axis request to the Wayland compositor
-	return nil
-}
-
-func (p *virtualPointer) AxisSource(axisSource uint32) error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	validSources := []uint32{AXIS_SOURCE_WHEEL, AXIS_SOURCE_FINGER, AXIS_SOURCE_CONTINUOUS, AXIS_SOURCE_WHEEL_TILT}
-	valid := false
-	for _, source := range validSources {
-		if axisSource == source {
-			valid = true
-			break
-		}
-	}
-
-	if !valid {
-		return &VirtualPointerError{
-			Code:    ERROR_INVALID_AXIS_SOURCE,
-			Message: "invalid axis source",
-		}
-	}
-
-	// This would send the actual axis_source request to the Wayland compositor
-	return nil
-}
-
-func (p *virtualPointer) AxisStop(time time.Time, axis uint32) error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	if axis != AXIS_VERTICAL_SCROLL && axis != AXIS_HORIZONTAL_SCROLL {
-		return &VirtualPointerError{
-			Code:    ERROR_INVALID_AXIS,
-			Message: "invalid axis",
-		}
-	}
-
-	// This would send the actual axis_stop request to the Wayland compositor
-	return nil
-}
-
-func (p *virtualPointer) AxisDiscrete(time time.Time, axis uint32, value float64, discrete int32) error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	if axis != AXIS_VERTICAL_SCROLL && axis != AXIS_HORIZONTAL_SCROLL {
-		return &VirtualPointerError{
-			Code:    ERROR_INVALID_AXIS,
-			Message: "invalid axis",
-		}
-	}
-
-	// This would send the actual axis_discrete request to the Wayland compositor
-	return nil
-}
-
-func (p *virtualPointer) Frame() error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	// This would send the actual frame request to the Wayland compositor
-	return nil
-}
-
-func (p *virtualPointer) Destroy() error {
-	if !p.active {
-		return &VirtualPointerError{
-			Code:    -1,
-			Message: "pointer not active",
-		}
-	}
-
-	p.active = false
-	return nil
-}
-
-// Convenience functions for common operations
-
-// Click performs a complete click operation (press + release + frame).
-func Click(pointer VirtualPointer, button uint32) error {
-	if err := pointer.ButtonPress(button); err != nil {
+// MoveRelative moves the pointer by the specified amount
+func (p *VirtualPointer) MoveRelative(dx, dy float64) error {
+	if err := p.Motion(time.Now(), dx, dy); err != nil {
 		return err
 	}
-	if err := pointer.ButtonRelease(button); err != nil {
-		return err
-	}
-	return pointer.Frame()
+	return p.Frame()
 }
 
-// Scroll performs a scroll operation with the given axis and value.
-func Scroll(pointer VirtualPointer, axis uint32, value float64) error {
+// LeftClick performs a left mouse button click
+func (p *VirtualPointer) LeftClick() error {
 	now := time.Now()
-	if err := pointer.AxisSource(AXIS_SOURCE_WHEEL); err != nil {
+	if err := p.Button(now, BTN_LEFT, ButtonStatePressed); err != nil {
 		return err
 	}
-	if err := pointer.Axis(now, axis, value); err != nil {
+	if err := p.Button(now, BTN_LEFT, ButtonStateReleased); err != nil {
 		return err
 	}
-	return pointer.Frame()
+	return p.Frame()
 }
 
-// ScrollVertical performs a vertical scroll operation.
-func ScrollVertical(pointer VirtualPointer, value float64) error {
-	return Scroll(pointer, AXIS_VERTICAL_SCROLL, value)
-}
-
-// ScrollHorizontal performs a horizontal scroll operation.
-func ScrollHorizontal(pointer VirtualPointer, value float64) error {
-	return Scroll(pointer, AXIS_HORIZONTAL_SCROLL, value)
-}
-
-// MoveRelative performs a relative mouse movement followed by a frame.
-func MoveRelative(pointer VirtualPointer, dx, dy float64) error {
-	if err := pointer.Motion(time.Now(), dx, dy); err != nil {
+// RightClick performs a right mouse button click
+func (p *VirtualPointer) RightClick() error {
+	now := time.Now()
+	if err := p.Button(now, BTN_RIGHT, ButtonStatePressed); err != nil {
 		return err
 	}
-	return pointer.Frame()
-}
-
-// MoveAbsolute performs an absolute mouse movement followed by a frame.
-func MoveAbsolute(pointer VirtualPointer, x, y, xExtent, yExtent uint32) error {
-	if err := pointer.MotionAbsolute(time.Now(), x, y, xExtent, yExtent); err != nil {
+	if err := p.Button(now, BTN_RIGHT, ButtonStateReleased); err != nil {
 		return err
 	}
-	return pointer.Frame()
+	return p.Frame()
+}
+
+// MiddleClick performs a middle mouse button click
+func (p *VirtualPointer) MiddleClick() error {
+	now := time.Now()
+	if err := p.Button(now, BTN_MIDDLE, ButtonStatePressed); err != nil {
+		return err
+	}
+	if err := p.Button(now, BTN_MIDDLE, ButtonStateReleased); err != nil {
+		return err
+	}
+	return p.Frame()
+}
+
+// ScrollVertical scrolls vertically by the specified amount
+func (p *VirtualPointer) ScrollVertical(amount float64) error {
+	if err := p.Axis(time.Now(), AxisVertical, amount); err != nil {
+		return err
+	}
+	return p.Frame()
+}
+
+// ScrollHorizontal scrolls horizontally by the specified amount
+func (p *VirtualPointer) ScrollHorizontal(amount float64) error {
+	if err := p.Axis(time.Now(), AxisHorizontal, amount); err != nil {
+		return err
+	}
+	return p.Frame()
 }
