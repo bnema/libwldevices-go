@@ -164,8 +164,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *protocolFlag != "virtual_pointer" && *protocolFlag != "virtual_keyboard" {
-		fmt.Fprintf(os.Stderr, "Error: -protocol must be 'virtual_pointer' or 'virtual_keyboard'\n")
+	if *protocolFlag != "virtual_pointer" && *protocolFlag != "virtual_keyboard" && *protocolFlag != "pointer_constraints" {
+		fmt.Fprintf(os.Stderr, "Error: -protocol must be 'virtual_pointer', 'virtual_keyboard', or 'pointer_constraints'\n")
 		os.Exit(1)
 	}
 
