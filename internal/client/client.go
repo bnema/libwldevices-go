@@ -1,3 +1,4 @@
+// Package client provides Wayland client connection management for virtual input protocols
 package client
 
 import (
@@ -15,10 +16,18 @@ type Client struct {
 	context    *wl.Context
 	
 	// Protocol globals
+<<<<<<< HEAD
 	pointerManager   uint32
 	keyboardManager  uint32
 	
 	mu sync.Mutex
+=======
+	pointerManager     uint32
+	keyboardManager    uint32
+	constraintsManager uint32
+
+	mu      sync.Mutex
+>>>>>>> 82885fa (feat: add pointer constraints protocol implementation)
 	globals map[uint32]string
 }
 
@@ -82,6 +91,9 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 		
 	case "zwp_virtual_keyboard_manager_v1":
 		c.keyboardManager = event.Name
+
+	case "zwp_pointer_constraints_v1":
+		c.constraintsManager = event.Name
 	}
 }
 
@@ -139,6 +151,20 @@ func (c *Client) GetKeyboardManagerName() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.keyboardManager
+}
+
+// HasPointerConstraints returns true if pointer constraints protocol is available
+func (c *Client) HasPointerConstraints() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.constraintsManager != 0
+}
+
+// GetConstraintsManagerName returns the name ID for the pointer constraints manager
+func (c *Client) GetConstraintsManagerName() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.constraintsManager
 }
 
 // Close closes the Wayland connection
