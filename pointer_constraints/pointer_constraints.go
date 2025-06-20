@@ -23,12 +23,20 @@ package pointer_constraints
 import (
 	"context"
 	"fmt"
+
+	"github.com/bnema/libwldevices-go/internal/client"
+	"github.com/bnema/libwldevices-go/internal/protocols"
+	"github.com/bnema/wlturbo/wl"
 )
 
 // Lifetime constants for pointer constraints
 const (
 	LIFETIME_ONESHOT    = 1 // Constraint destroyed on pointer unlock/unconfine
 	LIFETIME_PERSISTENT = 2 // Constraint persists across pointer unlock/unconfine
+	
+	// Alternative names used in examples
+	LifetimeOneshot    = LIFETIME_ONESHOT
+	LifetimePersistent = LIFETIME_PERSISTENT
 )
 
 // Error constants for pointer constraints
@@ -36,42 +44,22 @@ const (
 	ERROR_ALREADY_CONSTRAINED = 1 // Pointer constraint already requested on that surface
 )
 
-// PointerConstraintsManager represents the zwp_pointer_constraints_v1 interface.
-// The global interface exposing pointer constraining functionality.
-type PointerConstraintsManager interface {
-	// Destroy destroys the pointer constraints manager.
-	Destroy() error
-
-	// LockPointer locks the pointer to its current position.
-	// The locked pointer will not move until an unlock request is sent.
-	LockPointer(surface interface{}, pointer interface{}, region interface{}, lifetime uint32) (LockedPointer, error)
-
-	// ConfinePointer confines the pointer to a region.
-	// The pointer will be confined to the region defined by the given region object.
-	ConfinePointer(surface interface{}, pointer interface{}, region interface{}, lifetime uint32) (ConfinedPointer, error)
+// PointerConstraintsManager manages pointer constraints
+type PointerConstraintsManager struct {
+	client  *client.Client
+	manager *protocols.PointerConstraintsManager
 }
 
-// LockedPointer represents the zwp_locked_pointer_v1 interface.
-// The locked pointer interface allows a client to lock the cursor position.
-type LockedPointer interface {
-	// Destroy destroys the locked pointer object.
-	Destroy() error
-
-	// SetCursorPositionHint provides a hint about where the cursor should be positioned.
-	SetCursorPositionHint(surfaceX, surfaceY float64) error
-
-	// SetRegion sets the region used to confine the pointer.
-	SetRegion(region interface{}) error
+// LockedPointer represents a locked pointer constraint
+type LockedPointer struct {
+	manager *PointerConstraintsManager
+	locked  *protocols.LockedPointer
 }
 
-// ConfinedPointer represents the zwp_confined_pointer_v1 interface.
-// The confined pointer interface allows a client to confine the cursor to a region.
-type ConfinedPointer interface {
-	// Destroy destroys the confined pointer object.
-	Destroy() error
-
-	// SetRegion sets the region used to confine the pointer.
-	SetRegion(region interface{}) error
+// ConfinedPointer represents a confined pointer constraint
+type ConfinedPointer struct {
+	manager  *PointerConstraintsManager
+	confined *protocols.ConfinedPointer
 }
 
 // PointerConstraintsError represents errors that can occur with pointer constraints operations.
@@ -84,44 +72,92 @@ func (e *PointerConstraintsError) Error() string {
 	return fmt.Sprintf("pointer constraints error %d: %s", e.Code, e.Message)
 }
 
-// Implementation structs (these would be implemented by the actual Wayland client library)
-
-// pointerConstraintsManager is the concrete implementation of PointerConstraintsManager.
-type pointerConstraintsManager struct {
-	// This would contain the actual Wayland client connection and manager object
-	// For now, we provide a stub implementation
-	connected bool
-}
-
 // NewPointerConstraintsManager creates a new pointer constraints manager.
-// In a real implementation, this would connect to the Wayland compositor
-// and bind to the zwp_pointer_constraints_v1 global.
-func NewPointerConstraintsManager(ctx context.Context) (PointerConstraintsManager, error) {
-	// This is a stub implementation - in reality, this would:
-	// 1. Connect to the Wayland display
-	// 2. Get the registry
-	// 3. Bind to zwp_pointer_constraints_v1
-	// 4. Return the manager object
+func NewPointerConstraintsManager(ctx context.Context) (*PointerConstraintsManager, error) {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	
-	return &pointerConstraintsManager{
-		connected: true,
-	}, nil
-}
-
-func (m *pointerConstraintsManager) Destroy() error {
-	if !m.connected {
-		return &PointerConstraintsError{
-			Code:    -1,
-			Message: "manager not connected",
+	// Create Wayland client with timeout
+	type clientResult struct {
+		client *client.Client
+		err    error
+	}
+	
+	clientCh := make(chan clientResult, 1)
+	go func() {
+		c, err := client.NewClient()
+		clientCh <- clientResult{client: c, err: err}
+	}()
+	
+	// Wait for client creation or context cancellation
+	var c *client.Client
+	select {
+	case result := <-clientCh:
+		if result.err != nil {
+			return nil, fmt.Errorf("failed to create client: %w", result.err)
 		}
+		c = result.client
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context cancelled during client creation: %w", ctx.Err())
 	}
 
-	m.connected = false
+	// Check if pointer constraints protocol is available using the client's detection
+	if !c.HasPointerConstraints() {
+		_ = c.Close()
+		return nil, fmt.Errorf("zwp_pointer_constraints_v1 not available - compositor may not support pointer-constraints protocol")
+	}
+
+	pcm := &PointerConstraintsManager{
+		client: c,
+	}
+
+	// Check context before binding
+	select {
+	case <-ctx.Done():
+		_ = c.Close()
+		return nil, fmt.Errorf("context cancelled before binding: %w", ctx.Err())
+	default:
+	}
+	
+	// Use the constraints manager name from the client
+	managerName := c.GetConstraintsManagerName()
+	registry := c.GetRegistry()
+	wayland_context := c.GetContext()
+
+	// Create and bind pointer constraints manager using detected name
+	pcm.manager = protocols.NewPointerConstraintsManager(wayland_context)
+	err := registry.Bind(managerName, protocols.PointerConstraintsInterface, 1, pcm.manager)
+	if err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("failed to bind pointer constraints manager: %w", err)
+	}
+
+	return pcm, nil
+}
+
+// Close closes the pointer constraints manager
+func (pcm *PointerConstraintsManager) Close() error {
+	if pcm.manager != nil {
+		_ = pcm.manager.Destroy()
+	}
+	if pcm.client != nil {
+		return pcm.client.Close()
+	}
 	return nil
 }
 
-func (m *pointerConstraintsManager) LockPointer(surface interface{}, pointer interface{}, region interface{}, lifetime uint32) (LockedPointer, error) {
-	if !m.connected {
+// Destroy destroys the pointer constraints manager
+func (pcm *PointerConstraintsManager) Destroy() error {
+	return pcm.Close()
+}
+
+// LockPointer locks the pointer to its current position
+func (pcm *PointerConstraintsManager) LockPointer(surface interface{}, pointer interface{}, region interface{}, lifetime uint32) (*LockedPointer, error) {
+	if pcm.manager == nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
 			Message: "manager not connected",
@@ -135,15 +171,45 @@ func (m *pointerConstraintsManager) LockPointer(surface interface{}, pointer int
 		}
 	}
 
-	// This would actually create the locked pointer object via Wayland protocol
-	return &lockedPointer{
-		manager: m,
-		active:  true,
+	// Convert interfaces to proper Wayland types
+	wlSurface, ok := surface.(*wl.Surface)
+	if !ok && surface != nil {
+		return nil, &PointerConstraintsError{
+			Code:    -1,
+			Message: "surface must be a *wl.Surface",
+		}
+	}
+
+	wlPointer, ok := pointer.(*wl.Pointer)
+	if !ok && pointer != nil {
+		return nil, &PointerConstraintsError{
+			Code:    -1,
+			Message: "pointer must be a *wl.Pointer",
+		}
+	}
+
+	wlRegion, ok := region.(*wl.Region)
+	if !ok && region != nil {
+		return nil, &PointerConstraintsError{
+			Code:    -1,
+			Message: "region must be a *wl.Region",
+		}
+	}
+
+	locked, err := pcm.manager.LockPointer(wlSurface, wlPointer, wlRegion, lifetime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock pointer: %w", err)
+	}
+
+	return &LockedPointer{
+		manager: pcm,
+		locked:  locked,
 	}, nil
 }
 
-func (m *pointerConstraintsManager) ConfinePointer(surface interface{}, pointer interface{}, region interface{}, lifetime uint32) (ConfinedPointer, error) {
-	if !m.connected {
+// ConfinePointer confines the pointer to a region
+func (pcm *PointerConstraintsManager) ConfinePointer(surface interface{}, pointer interface{}, region interface{}, lifetime uint32) (*ConfinedPointer, error) {
+	if pcm.manager == nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
 			Message: "manager not connected",
@@ -157,98 +223,142 @@ func (m *pointerConstraintsManager) ConfinePointer(surface interface{}, pointer 
 		}
 	}
 
-	// This would actually create the confined pointer object via Wayland protocol
-	return &confinedPointer{
-		manager: m,
-		active:  true,
+	// Convert interfaces to proper Wayland types
+	wlSurface, ok := surface.(*wl.Surface)
+	if !ok && surface != nil {
+		return nil, &PointerConstraintsError{
+			Code:    -1,
+			Message: "surface must be a *wl.Surface",
+		}
+	}
+
+	wlPointer, ok := pointer.(*wl.Pointer)
+	if !ok && pointer != nil {
+		return nil, &PointerConstraintsError{
+			Code:    -1,
+			Message: "pointer must be a *wl.Pointer",
+		}
+	}
+
+	wlRegion, ok := region.(*wl.Region)
+	if !ok && region != nil {
+		return nil, &PointerConstraintsError{
+			Code:    -1,
+			Message: "region must be a *wl.Region",
+		}
+	}
+
+	confined, err := pcm.manager.ConfinePointer(wlSurface, wlPointer, wlRegion, lifetime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to confine pointer: %w", err)
+	}
+
+	return &ConfinedPointer{
+		manager:  pcm,
+		confined: confined,
 	}, nil
 }
 
-// lockedPointer is the concrete implementation of LockedPointer.
-type lockedPointer struct {
-	manager *pointerConstraintsManager
-	active  bool
+// LockedPointer methods
+
+// Destroy destroys the locked pointer object
+func (lp *LockedPointer) Destroy() error {
+	if lp.locked != nil {
+		return lp.locked.Destroy()
+	}
+	return nil
 }
 
-func (l *lockedPointer) Destroy() error {
-	if !l.active {
+// SetCursorPositionHint provides a hint about where the cursor should be positioned
+func (lp *LockedPointer) SetCursorPositionHint(surfaceX, surfaceY float64) error {
+	if lp.locked != nil {
+		return lp.locked.SetCursorPositionHint(surfaceX, surfaceY)
+	}
+	return &PointerConstraintsError{
+		Code:    -1,
+		Message: "locked pointer not active",
+	}
+}
+
+// SetRegion sets the region used to confine the pointer
+func (lp *LockedPointer) SetRegion(region interface{}) error {
+	if lp.locked == nil {
 		return &PointerConstraintsError{
 			Code:    -1,
 			Message: "locked pointer not active",
 		}
 	}
 
-	l.active = false
-	return nil
-}
-
-func (l *lockedPointer) SetCursorPositionHint(surfaceX, surfaceY float64) error {
-	if !l.active {
+	wlRegion, ok := region.(*wl.Region)
+	if !ok && region != nil {
 		return &PointerConstraintsError{
 			Code:    -1,
-			Message: "locked pointer not active",
+			Message: "region must be a *wl.Region",
 		}
 	}
 
-	// This would send the actual cursor position hint request to the Wayland compositor
-	return nil
+	return lp.locked.SetRegion(wlRegion)
 }
 
-func (l *lockedPointer) SetRegion(region interface{}) error {
-	if !l.active {
-		return &PointerConstraintsError{
-			Code:    -1,
-			Message: "locked pointer not active",
-		}
+// ConfinedPointer methods
+
+// Destroy destroys the confined pointer object
+func (cp *ConfinedPointer) Destroy() error {
+	if cp.confined != nil {
+		return cp.confined.Destroy()
 	}
-
-	// This would send the actual set region request to the Wayland compositor
 	return nil
 }
 
-// confinedPointer is the concrete implementation of ConfinedPointer.
-type confinedPointer struct {
-	manager *pointerConstraintsManager
-	active  bool
-}
-
-func (c *confinedPointer) Destroy() error {
-	if !c.active {
+// SetRegion sets the region used to confine the pointer
+func (cp *ConfinedPointer) SetRegion(region interface{}) error {
+	if cp.confined == nil {
 		return &PointerConstraintsError{
 			Code:    -1,
 			Message: "confined pointer not active",
 		}
 	}
 
-	c.active = false
-	return nil
-}
-
-func (c *confinedPointer) SetRegion(region interface{}) error {
-	if !c.active {
+	wlRegion, ok := region.(*wl.Region)
+	if !ok && region != nil {
 		return &PointerConstraintsError{
 			Code:    -1,
-			Message: "confined pointer not active",
+			Message: "region must be a *wl.Region",
 		}
 	}
 
-	// This would send the actual set region request to the Wayland compositor
-	return nil
+	return cp.confined.SetRegion(wlRegion)
 }
 
 // Convenience functions for common operations
 
 // LockPointerAtCurrentPosition locks the pointer at its current position with oneshot lifetime.
-func LockPointerAtCurrentPosition(manager PointerConstraintsManager, surface interface{}, pointer interface{}) (LockedPointer, error) {
+func LockPointerAtCurrentPosition(manager *PointerConstraintsManager, surface interface{}, pointer interface{}) (*LockedPointer, error) {
 	return manager.LockPointer(surface, pointer, nil, LIFETIME_ONESHOT)
 }
 
 // LockPointerPersistent locks the pointer at its current position with persistent lifetime.
-func LockPointerPersistent(manager PointerConstraintsManager, surface interface{}, pointer interface{}) (LockedPointer, error) {
+func LockPointerPersistent(manager *PointerConstraintsManager, surface interface{}, pointer interface{}) (*LockedPointer, error) {
 	return manager.LockPointer(surface, pointer, nil, LIFETIME_PERSISTENT)
 }
 
 // ConfinePointerToRegion confines the pointer to a specific region with oneshot lifetime.
-func ConfinePointerToRegion(manager PointerConstraintsManager, surface interface{}, pointer interface{}, region interface{}) (ConfinedPointer, error) {
+func ConfinePointerToRegion(manager *PointerConstraintsManager, surface interface{}, pointer interface{}, region interface{}) (*ConfinedPointer, error) {
 	return manager.ConfinePointer(surface, pointer, region, LIFETIME_ONESHOT)
+}
+
+// globalHandler is a helper type for handling registry globals
+type globalHandler struct {
+	found   *bool
+	name    *uint32
+	version *uint32
+}
+
+// HandleRegistryGlobal implements the RegistryGlobalHandler interface
+func (h *globalHandler) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
+	if event.Interface == protocols.PointerConstraintsInterface {
+		*h.found = true
+		*h.name = event.Name
+		*h.version = event.Version
+	}
 }

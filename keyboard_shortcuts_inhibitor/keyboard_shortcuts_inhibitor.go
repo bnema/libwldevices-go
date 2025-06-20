@@ -74,8 +74,15 @@ type keyboardShortcutsInhibitorManager struct {
 // In a real implementation, this would connect to the Wayland compositor
 // and bind to the zwp_keyboard_shortcuts_inhibit_manager_v1 global.
 func NewKeyboardShortcutsInhibitorManager(ctx context.Context) (KeyboardShortcutsInhibitorManager, error) {
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	
 	// This is a stub implementation - in reality, this would:
-	// 1. Connect to the Wayland display
+	// 1. Connect to the Wayland display with context timeout
 	// 2. Get the registry
 	// 3. Bind to zwp_keyboard_shortcuts_inhibit_manager_v1
 	// 4. Return the manager object

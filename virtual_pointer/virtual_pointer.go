@@ -47,9 +47,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bnema/wayland-virtual-input-go/internal/client"
-	"github.com/bnema/wayland-virtual-input-go/internal/protocols"
-	"github.com/neurlang/wayland/wl"
+	"github.com/bnema/libwldevices-go/internal/client"
+	"github.com/bnema/libwldevices-go/internal/protocols"
+	"github.com/bnema/wlturbo/wl"
 )
 
 // Button constants for mouse buttons
@@ -84,27 +84,30 @@ const (
 // ButtonState represents the state of a button
 type ButtonState uint32
 
+// Button state constants
 const (
-	ButtonStateReleased ButtonState = 0
-	ButtonStatePressed  ButtonState = 1
+	ButtonStateReleased ButtonState = 0 // Button is released
+	ButtonStatePressed  ButtonState = 1 // Button is pressed
 )
 
 // Axis represents a scroll axis
 type Axis uint32
 
+// Axis direction constants
 const (
-	AxisVertical   Axis = 0
-	AxisHorizontal Axis = 1
+	AxisVertical   Axis = 0 // Vertical scroll axis
+	AxisHorizontal Axis = 1 // Horizontal scroll axis
 )
 
 // AxisSource represents the source of axis events
 type AxisSource uint32
 
+// Axis source constants
 const (
-	AxisSourceWheel      AxisSource = 0
-	AxisSourceFinger     AxisSource = 1
-	AxisSourceContinuous AxisSource = 2
-	AxisSourceWheelTilt  AxisSource = 3
+	AxisSourceWheel      AxisSource = 0 // Mouse wheel
+	AxisSourceFinger     AxisSource = 1 // Finger on touchpad
+	AxisSourceContinuous AxisSource = 2 // Continuous scroll
+	AxisSourceWheelTilt  AxisSource = 3 // Wheel tilt
 )
 
 // VirtualPointerManager manages virtual pointer devices
@@ -125,40 +128,84 @@ func floatToFixed(val float64) wl.Fixed {
 
 // NewVirtualPointerManager creates a new virtual pointer manager
 func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, error) {
-	// Create Wayland client
-	c, err := client.NewClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Wayland client: %w", err)
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	
+	// Create Wayland client with timeout
+	type clientResult struct {
+		client *client.Client
+		err    error
+	}
+	
+	clientCh := make(chan clientResult, 1)
+	go func() {
+		c, err := client.NewClient()
+		clientCh <- clientResult{client: c, err: err}
+	}()
+	
+	// Wait for client creation or context cancellation
+	var c *client.Client
+	select {
+	case result := <-clientCh:
+		if result.err != nil {
+			return nil, fmt.Errorf("failed to create Wayland client: %w", result.err)
+		}
+		c = result.client
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context cancelled during client creation: %w", ctx.Err())
 	}
 	
 	// Check if virtual pointer protocol is available
 	if !c.HasVirtualPointer() {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("zwlr_virtual_pointer_manager_v1 not available")
 	}
 	
 	// Create the manager proxy
 	manager := protocols.NewVirtualPointerManager(c.GetContext())
 	
+	// Check context before binding
+	select {
+	case <-ctx.Done():
+		_ = c.Close()
+		return nil, fmt.Errorf("context cancelled before binding: %w", ctx.Err())
+	default:
+	}
+	
 	// Bind to the global
 	name := c.GetPointerManagerName()
-	err = c.GetRegistry().Bind(name, protocols.VirtualPointerManagerInterface, 1, manager)
+	err := c.GetRegistry().Bind(name, protocols.VirtualPointerManagerInterface, 1, manager)
 	if err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("failed to bind virtual pointer manager: %w", err)
 	}
 	
-	// Sync to ensure binding is complete
+	// Sync to ensure binding is complete with context support
 	sync, err := c.GetDisplay().Sync()
 	if err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("failed to sync: %w", err)
 	}
 	
-	err = c.GetContext().RunTill(sync)
-	if err != nil {
-		c.Close()
-		return nil, fmt.Errorf("failed to wait for sync: %w", err)
+	// Wait for sync with context support
+	syncDone := make(chan error, 1)
+	go func() {
+		syncDone <- c.GetContext().RunTill(sync)
+	}()
+	
+	select {
+	case err = <-syncDone:
+		if err != nil {
+			_ = c.Close()
+			return nil, fmt.Errorf("failed to wait for sync: %w", err)
+		}
+	case <-ctx.Done():
+		_ = c.Close()
+		return nil, fmt.Errorf("context cancelled during sync: %w", ctx.Err())
 	}
 	
 	return &VirtualPointerManager{
@@ -182,19 +229,22 @@ func (m *VirtualPointerManager) CreatePointer() (*VirtualPointer, error) {
 
 // Motion sends a relative motion event
 func (p *VirtualPointer) Motion(timestamp time.Time, dx, dy float64) error {
-	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	// Safe conversion: truncate to 32-bit milliseconds (about 49 days from epoch)
+	timeMs := uint32(timestamp.UnixMilli() & 0xFFFFFFFF)
 	return p.pointer.Motion(timeMs, floatToFixed(dx), floatToFixed(dy))
 }
 
 // MotionAbsolute sends an absolute motion event
 func (p *VirtualPointer) MotionAbsolute(timestamp time.Time, x, y uint32, xExtent, yExtent uint32) error {
-	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	// Safe conversion: truncate to 32-bit milliseconds (about 49 days from epoch)
+	timeMs := uint32(timestamp.UnixMilli() & 0xFFFFFFFF)
 	return p.pointer.MotionAbsolute(timeMs, x, y, xExtent, yExtent)
 }
 
 // Button sends a button press/release event
 func (p *VirtualPointer) Button(timestamp time.Time, button uint32, state ButtonState) error {
-	timeMs := uint32(timestamp.UnixNano() / 1000000)
+	// Safe conversion: truncate to 32-bit milliseconds (about 49 days from epoch)
+	timeMs := uint32(timestamp.UnixMilli() & 0xFFFFFFFF)
 	return p.pointer.Button(timeMs, button, uint32(state))
 }
 
@@ -234,7 +284,7 @@ func (p *VirtualPointer) Close() error {
 // Close releases the virtual pointer manager
 func (m *VirtualPointerManager) Close() error {
 	if m.manager != nil {
-		m.manager.Destroy()
+		_ = m.manager.Destroy()
 	}
 	if m.client != nil {
 		return m.client.Close()

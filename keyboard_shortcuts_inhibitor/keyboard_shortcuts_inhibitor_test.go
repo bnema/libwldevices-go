@@ -41,7 +41,7 @@ func TestInhibitShortcuts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Destroy() }()
 
 	surface := &mockSurface{}
 	seat := &mockSeat{}
@@ -73,7 +73,7 @@ func TestInhibitShortcutsWithNilSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Destroy() }()
 
 	seat := &mockSeat{}
 
@@ -89,7 +89,7 @@ func TestInhibitShortcutsWithNilSeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Destroy() }()
 
 	surface := &mockSurface{}
 
@@ -105,7 +105,7 @@ func TestInhibitorDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Destroy() }()
 
 	surface := &mockSurface{}
 	seat := &mockSeat{}
@@ -140,7 +140,7 @@ func TestCreateTemporaryInhibitor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Destroy() }()
 
 	surface := &mockSurface{}
 	seat := &mockSeat{}
@@ -160,7 +160,7 @@ func TestCreateTemporaryInhibitor(t *testing.T) {
 	}
 
 	// Clean up
-	inhibitor.Destroy()
+	_ = inhibitor.Destroy()
 }
 
 func TestGetStatusWithInvalidInhibitor(t *testing.T) {
@@ -188,7 +188,7 @@ func TestInhibitorAfterManagerDestroy(t *testing.T) {
 	}
 
 	// Destroy manager
-	manager.Destroy()
+	_ = manager.Destroy()
 
 	// Try to create new inhibitor after manager is destroyed
 	_, err = manager.InhibitShortcuts(surface, seat)
