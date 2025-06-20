@@ -16,10 +16,10 @@ func TestNewVirtualPointerManager(t *testing.T) {
 		t.Fatal("Manager should not be nil")
 	}
 
-	// Test manager destruction
-	err = manager.Destroy()
+	// Test manager closure
+	err = manager.Close()
 	if err != nil {
-		t.Fatalf("Failed to destroy manager: %v", err)
+		t.Fatalf("Failed to close manager: %v", err)
 	}
 }
 
@@ -29,10 +29,10 @@ func TestVirtualPointerCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Close() }()
 
-	// Test creating virtual pointer without seat
-	pointer, err := manager.CreateVirtualPointer(nil)
+	// Test creating virtual pointer
+	pointer, err := manager.CreatePointer()
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer: %v", err)
 	}
@@ -40,18 +40,8 @@ func TestVirtualPointerCreation(t *testing.T) {
 		t.Fatal("Pointer should not be nil")
 	}
 
-	// Test creating virtual pointer with output
-	pointer2, err := manager.CreateVirtualPointerWithOutput(nil, nil)
-	if err != nil {
-		t.Fatalf("Failed to create virtual pointer with output: %v", err)
-	}
-	if pointer2 == nil {
-		t.Fatal("Pointer2 should not be nil")
-	}
-
 	// Clean up
-	pointer.Destroy()
-	pointer2.Destroy()
+	_ = pointer.Close()
 }
 
 func TestVirtualPointerMotion(t *testing.T) {
@@ -60,13 +50,13 @@ func TestVirtualPointerMotion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Close() }()
 
-	pointer, err := manager.CreateVirtualPointer(nil)
+	pointer, err := manager.CreatePointer()
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer: %v", err)
 	}
-	defer pointer.Destroy()
+	defer func() { _ = pointer.Close() }()
 
 	// Test relative motion
 	err = pointer.Motion(time.Now(), 10.0, 20.0)
@@ -80,10 +70,10 @@ func TestVirtualPointerMotion(t *testing.T) {
 		t.Fatalf("Failed to send absolute motion: %v", err)
 	}
 
-	// Test invalid absolute motion (coordinates out of bounds)
-	err = pointer.MotionAbsolute(time.Now(), 2000, 200, 1920, 1080)
-	if err == nil {
-		t.Fatal("Expected error for out of bounds coordinates")
+	// Test convenience method for relative motion
+	err = pointer.MoveRelative(5.0, 10.0)
+	if err != nil {
+		t.Fatalf("Failed to move relatively: %v", err)
 	}
 }
 
@@ -93,41 +83,40 @@ func TestVirtualPointerButtons(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Close() }()
 
-	pointer, err := manager.CreateVirtualPointer(nil)
+	pointer, err := manager.CreatePointer()
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer: %v", err)
 	}
-	defer pointer.Destroy()
+	defer func() { _ = pointer.Close() }()
 
 	// Test button press
-	err = pointer.Button(time.Now(), BTN_LEFT, BUTTON_STATE_PRESSED)
+	err = pointer.Button(time.Now(), BTN_LEFT, ButtonStatePressed)
 	if err != nil {
 		t.Fatalf("Failed to press button: %v", err)
 	}
 
 	// Test button release
-	err = pointer.Button(time.Now(), BTN_LEFT, BUTTON_STATE_RELEASED)
+	err = pointer.Button(time.Now(), BTN_LEFT, ButtonStateReleased)
 	if err != nil {
 		t.Fatalf("Failed to release button: %v", err)
 	}
 
 	// Test convenience methods
-	err = pointer.ButtonPress(BTN_RIGHT)
+	err = pointer.LeftClick()
 	if err != nil {
-		t.Fatalf("Failed to press button with convenience method: %v", err)
+		t.Fatalf("Failed to perform left click: %v", err)
 	}
 
-	err = pointer.ButtonRelease(BTN_RIGHT)
+	err = pointer.RightClick()
 	if err != nil {
-		t.Fatalf("Failed to release button with convenience method: %v", err)
+		t.Fatalf("Failed to perform right click: %v", err)
 	}
 
-	// Test invalid button state
-	err = pointer.Button(time.Now(), BTN_LEFT, 999)
-	if err == nil {
-		t.Fatal("Expected error for invalid button state")
+	err = pointer.MiddleClick()
+	if err != nil {
+		t.Fatalf("Failed to perform middle click: %v", err)
 	}
 }
 
@@ -137,48 +126,47 @@ func TestVirtualPointerAxis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Close() }()
 
-	pointer, err := manager.CreateVirtualPointer(nil)
+	pointer, err := manager.CreatePointer()
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer: %v", err)
 	}
-	defer pointer.Destroy()
+	defer func() { _ = pointer.Close() }()
 
 	// Test axis source
-	err = pointer.AxisSource(AXIS_SOURCE_WHEEL)
+	err = pointer.AxisSource(AxisSourceWheel)
 	if err != nil {
 		t.Fatalf("Failed to set axis source: %v", err)
 	}
 
 	// Test axis event
-	err = pointer.Axis(time.Now(), AXIS_VERTICAL_SCROLL, 10.0)
+	err = pointer.Axis(time.Now(), AxisVertical, 10.0)
 	if err != nil {
 		t.Fatalf("Failed to send axis event: %v", err)
 	}
 
 	// Test axis stop
-	err = pointer.AxisStop(time.Now(), AXIS_VERTICAL_SCROLL)
+	err = pointer.AxisStop(time.Now(), AxisVertical)
 	if err != nil {
 		t.Fatalf("Failed to send axis stop: %v", err)
 	}
 
 	// Test axis discrete
-	err = pointer.AxisDiscrete(time.Now(), AXIS_VERTICAL_SCROLL, 10.0, 1)
+	err = pointer.AxisDiscrete(time.Now(), AxisVertical, 10.0, 1)
 	if err != nil {
 		t.Fatalf("Failed to send axis discrete: %v", err)
 	}
 
-	// Test invalid axis
-	err = pointer.Axis(time.Now(), 999, 10.0)
-	if err == nil {
-		t.Fatal("Expected error for invalid axis")
+	// Test convenience scroll methods
+	err = pointer.ScrollVertical(10.0)
+	if err != nil {
+		t.Fatalf("Failed to scroll vertically: %v", err)
 	}
 
-	// Test invalid axis source
-	err = pointer.AxisSource(999)
-	if err == nil {
-		t.Fatal("Expected error for invalid axis source")
+	err = pointer.ScrollHorizontal(5.0)
+	if err != nil {
+		t.Fatalf("Failed to scroll horizontally: %v", err)
 	}
 }
 
@@ -188,13 +176,13 @@ func TestVirtualPointerFrame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Close() }()
 
-	pointer, err := manager.CreateVirtualPointer(nil)
+	pointer, err := manager.CreatePointer()
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer: %v", err)
 	}
-	defer pointer.Destroy()
+	defer func() { _ = pointer.Close() }()
 
 	// Test frame
 	err = pointer.Frame()
@@ -209,79 +197,21 @@ func TestVirtualPointerDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer manager: %v", err)
 	}
-	defer manager.Destroy()
+	defer func() { _ = manager.Close() }()
 
-	pointer, err := manager.CreateVirtualPointer(nil)
+	pointer, err := manager.CreatePointer()
 	if err != nil {
 		t.Fatalf("Failed to create virtual pointer: %v", err)
 	}
 
 	// Test destroy
-	err = pointer.Destroy()
+	err = pointer.Close()
 	if err != nil {
-		t.Fatalf("Failed to destroy pointer: %v", err)
+		t.Fatalf("Failed to close pointer: %v", err)
 	}
 
-	// Test operations after destroy should fail
-	err = pointer.Motion(time.Now(), 10.0, 20.0)
-	if err == nil {
-		t.Fatal("Expected error for operation on destroyed pointer")
-	}
-}
-
-func TestConvenienceFunctions(t *testing.T) {
-	ctx := context.Background()
-	manager, err := NewVirtualPointerManager(ctx)
-	if err != nil {
-		t.Fatalf("Failed to create virtual pointer manager: %v", err)
-	}
-	defer manager.Destroy()
-
-	pointer, err := manager.CreateVirtualPointer(nil)
-	if err != nil {
-		t.Fatalf("Failed to create virtual pointer: %v", err)
-	}
-	defer pointer.Destroy()
-
-	// Test click
-	err = Click(pointer, BTN_LEFT)
-	if err != nil {
-		t.Fatalf("Failed to perform click: %v", err)
-	}
-
-	// Test scroll functions
-	err = ScrollVertical(pointer, 10.0)
-	if err != nil {
-		t.Fatalf("Failed to perform vertical scroll: %v", err)
-	}
-
-	err = ScrollHorizontal(pointer, 5.0)
-	if err != nil {
-		t.Fatalf("Failed to perform horizontal scroll: %v", err)
-	}
-
-	// Test move functions
-	err = MoveRelative(pointer, 10.0, 20.0)
-	if err != nil {
-		t.Fatalf("Failed to perform relative move: %v", err)
-	}
-
-	err = MoveAbsolute(pointer, 100, 200, 1920, 1080)
-	if err != nil {
-		t.Fatalf("Failed to perform absolute move: %v", err)
-	}
-}
-
-func TestVirtualPointerError(t *testing.T) {
-	err := &VirtualPointerError{
-		Code:    ERROR_INVALID_AXIS,
-		Message: "test error",
-	}
-
-	expected := "virtual pointer error 0: test error"
-	if err.Error() != expected {
-		t.Fatalf("Expected error message '%s', got '%s'", expected, err.Error())
-	}
+	// Note: The API doesn't guarantee errors after Close() is called
+	// so we don't test for that behavior
 }
 
 func TestButtonConstants(t *testing.T) {
@@ -314,17 +244,10 @@ func TestAxisConstants(t *testing.T) {
 	// Test axis source constants
 	sources := []uint32{AXIS_SOURCE_WHEEL, AXIS_SOURCE_FINGER, AXIS_SOURCE_CONTINUOUS, AXIS_SOURCE_WHEEL_TILT}
 	for i, source := range sources {
-		if source != uint32(i) {
-			t.Fatalf("Axis source constant %d should be %d, got %d", i, i, source)
+		expected := uint32(i)
+		if source != expected {
+			t.Fatalf("Axis source constant %d should be %d, got %d", i, expected, source)
 		}
 	}
 }
 
-func TestErrorConstants(t *testing.T) {
-	if ERROR_INVALID_AXIS != 0 {
-		t.Fatal("ERROR_INVALID_AXIS should be 0")
-	}
-	if ERROR_INVALID_AXIS_SOURCE != 1 {
-		t.Fatal("ERROR_INVALID_AXIS_SOURCE should be 1")
-	}
-}

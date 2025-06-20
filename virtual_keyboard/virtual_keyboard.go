@@ -12,7 +12,7 @@
 //		log.Fatal(err)
 //	}
 //	defer manager.Close()
-//	
+//
 //	keyboard, err := manager.CreateKeyboard()
 //	if err != nil {
 //		log.Fatal(err)
@@ -42,8 +42,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bnema/wayland-virtual-input-go/internal/client"
-	"github.com/bnema/wayland-virtual-input-go/internal/protocols"
+	"github.com/bnema/libwldevices-go/internal/client"
+	"github.com/bnema/libwldevices-go/internal/protocols"
 )
 
 // Common key constants (Linux input event codes)
@@ -89,10 +89,25 @@ const (
 	KEY_TAB       = 15
 	KEY_BACKSPACE = 14
 	KEY_ESC       = 1
+	KEY_CAPSLOCK  = 58
 	KEY_LEFTSHIFT = 42
 	KEY_LEFTCTRL  = 29
 	KEY_LEFTALT   = 56
 	KEY_LEFTMETA  = 125
+	
+	// Additional keys for special characters
+	KEY_MINUS        = 12  // - and _
+	KEY_EQUAL        = 13  // = and +
+	KEY_LEFTBRACE    = 26  // [ and {
+	KEY_RIGHTBRACE   = 27  // ] and }
+	KEY_SEMICOLON    = 39  // ; and :
+	KEY_APOSTROPHE   = 40  // ' and "
+	KEY_GRAVE        = 41  // ` and ~
+	KEY_BACKSLASH    = 43  // \ and |
+	KEY_COMMA        = 51  // , and <
+	KEY_DOT          = 52  // . and >
+	KEY_SLASH        = 53  // / and ?
+	KEY_RIGHTSHIFT   = 54
 )
 
 // Key state constants
@@ -110,9 +125,10 @@ const (
 // KeyState represents the state of a key
 type KeyState uint32
 
+// Key state constants
 const (
-	KeyStateReleased KeyState = 0
-	KeyStatePressed  KeyState = 1
+	KeyStateReleased KeyState = 0 // Key is released
+	KeyStatePressed  KeyState = 1 // Key is pressed
 )
 
 // VirtualKeyboardManager manages virtual keyboard devices
@@ -124,47 +140,74 @@ type VirtualKeyboardManager struct {
 // VirtualKeyboard represents a virtual keyboard device
 type VirtualKeyboard struct {
 	keyboard  *protocols.VirtualKeyboard
+	client    *client.Client
 	keymapSet bool
 }
 
 // NewVirtualKeyboardManager creates a new virtual keyboard manager
 func NewVirtualKeyboardManager(ctx context.Context) (*VirtualKeyboardManager, error) {
-	// Create Wayland client
-	c, err := client.NewClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Wayland client: %w", err)
+	// Check if context is already cancelled
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 	
+	// Create Wayland client with timeout
+	type clientResult struct {
+		client *client.Client
+		err    error
+	}
+	
+	clientCh := make(chan clientResult, 1)
+	go func() {
+		c, err := client.NewClient()
+		clientCh <- clientResult{client: c, err: err}
+	}()
+	
+	// Wait for client creation or context cancellation
+	var c *client.Client
+	select {
+	case result := <-clientCh:
+		if result.err != nil {
+			return nil, fmt.Errorf("failed to create Wayland client: %w", result.err)
+		}
+		c = result.client
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context cancelled during client creation: %w", ctx.Err())
+	}
+
 	// Check if virtual keyboard protocol is available
 	if !c.HasVirtualKeyboard() {
 		c.Close()
 		return nil, fmt.Errorf("zwp_virtual_keyboard_manager_v1 not available")
 	}
+
+	// Check context before binding
+	select {
+	case <-ctx.Done():
+		_ = c.Close()
+		return nil, fmt.Errorf("context cancelled before binding: %w", ctx.Err())
+	default:
+	}
 	
 	// Create the manager proxy
 	manager := protocols.NewVirtualKeyboardManager(c.GetContext())
-	
+
 	// Bind to the global
 	name := c.GetKeyboardManagerName()
-	err = c.GetRegistry().Bind(name, protocols.VirtualKeyboardManagerInterface, 1, manager)
+	err := c.GetRegistry().Bind(name, protocols.VirtualKeyboardManagerInterface, 1, manager)
 	if err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("failed to bind virtual keyboard manager: %w", err)
 	}
-	
+
 	// Sync to ensure binding is complete
-	sync, err := c.GetDisplay().Sync()
-	if err != nil {
+	if err := c.GetDisplay().Roundtrip(); err != nil {
 		c.Close()
-		return nil, fmt.Errorf("failed to sync: %w", err)
+		return nil, fmt.Errorf("failed to roundtrip after binding: %w", err)
 	}
-	
-	err = c.GetContext().RunTill(sync)
-	if err != nil {
-		c.Close()
-		return nil, fmt.Errorf("failed to wait for sync: %w", err)
-	}
-	
+
 	return &VirtualKeyboardManager{
 		client:  c,
 		manager: manager,
@@ -178,17 +221,24 @@ func (m *VirtualKeyboardManager) CreateKeyboard() (*VirtualKeyboard, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create virtual keyboard: %w", err)
 	}
-	
+
+	// Sync to ensure the keyboard is created
+	if err := m.client.GetDisplay().Roundtrip(); err != nil {
+		_ = keyboard.Destroy()
+		return nil, fmt.Errorf("failed to roundtrip after creating keyboard: %w", err)
+	}
+
 	vk := &VirtualKeyboard{
 		keyboard: keyboard,
+		client:   m.client,
 	}
-	
+
 	// Set default keymap
 	if err := vk.setDefaultKeymap(); err != nil {
-		keyboard.Destroy()
+		_ = keyboard.Destroy()
 		return nil, fmt.Errorf("failed to set default keymap: %w", err)
 	}
-	
+
 	return vk, nil
 }
 
@@ -198,16 +248,28 @@ func (k *VirtualKeyboard) setDefaultKeymap() error {
 	if err != nil {
 		return err
 	}
-	
+
+	// Send the keymap
 	err = k.keyboard.Keymap(KEYMAP_FORMAT_XKB_V1, fd, size)
-	if err == nil {
-		k.keymapSet = true
+	if err != nil {
+		syscall.Close(fd)
+		return err
 	}
+
+	k.keymapSet = true
 	
-	// Close the fd after sending
-	syscall.Close(fd)
+	// Don't close the FD - the compositor needs to read it
+	// The compositor will close it when done
 	
-	return err
+	// Do a roundtrip to ensure the keymap is processed
+	err = k.client.GetDisplay().Roundtrip()
+	if err != nil {
+		return fmt.Errorf("failed to roundtrip after keymap: %w", err)
+	}
+
+	// Note: FD is closed by the compositor after reading
+	
+	return nil
 }
 
 // Key sends a key press/release event
@@ -215,7 +277,7 @@ func (k *VirtualKeyboard) Key(timestamp time.Time, key uint32, state KeyState) e
 	if !k.keymapSet {
 		return fmt.Errorf("keymap not set")
 	}
-	
+
 	timeMs := uint32(timestamp.UnixNano() / 1000000)
 	return k.keyboard.Key(timeMs, key, uint32(state))
 }
@@ -225,7 +287,7 @@ func (k *VirtualKeyboard) Modifiers(modsDepressed, modsLatched, modsLocked, grou
 	if !k.keymapSet {
 		return fmt.Errorf("keymap not set")
 	}
-	
+
 	return k.keyboard.Modifiers(modsDepressed, modsLatched, modsLocked, group)
 }
 
@@ -237,7 +299,7 @@ func (k *VirtualKeyboard) Close() error {
 // Close releases the virtual keyboard manager
 func (m *VirtualKeyboardManager) Close() error {
 	if m.manager != nil {
-		m.manager.Destroy()
+		_ = m.manager.Destroy()
 	}
 	if m.client != nil {
 		return m.client.Close()
@@ -265,11 +327,17 @@ func (k *VirtualKeyboard) TypeKey(key uint32) error {
 	}
 	// Small delay between press and release
 	time.Sleep(10 * time.Millisecond)
-	return k.Key(time.Now(), key, KeyStateReleased)
+	now = time.Now()
+	if err := k.Key(now, key, KeyStateReleased); err != nil {
+		return err
+	}
+	// Don't do roundtrip after every key - let the example control this
+	return nil
 }
 
 // TypeString types a string (basic ASCII support)
 func (k *VirtualKeyboard) TypeString(text string) error {
+	// Basic key mappings (no shift needed)
 	keyMap := map[rune]uint32{
 		'a': KEY_A, 'b': KEY_B, 'c': KEY_C, 'd': KEY_D, 'e': KEY_E,
 		'f': KEY_F, 'g': KEY_G, 'h': KEY_H, 'i': KEY_I, 'j': KEY_J,
@@ -277,45 +345,66 @@ func (k *VirtualKeyboard) TypeString(text string) error {
 		'p': KEY_P, 'q': KEY_Q, 'r': KEY_R, 's': KEY_S, 't': KEY_T,
 		'u': KEY_U, 'v': KEY_V, 'w': KEY_W, 'x': KEY_X, 'y': KEY_Y,
 		'z': KEY_Z,
+		'0': KEY_0, '1': KEY_1, '2': KEY_2, '3': KEY_3, '4': KEY_4,
+		'5': KEY_5, '6': KEY_6, '7': KEY_7, '8': KEY_8, '9': KEY_9,
+		' ': KEY_SPACE, '\n': KEY_ENTER, '\t': KEY_TAB,
+		'-': KEY_MINUS, '=': KEY_EQUAL, '[': KEY_LEFTBRACE, ']': KEY_RIGHTBRACE,
+		';': KEY_SEMICOLON, '\'': KEY_APOSTROPHE, '`': KEY_GRAVE,
+		'\\': KEY_BACKSLASH, ',': KEY_COMMA, '.': KEY_DOT, '/': KEY_SLASH,
+	}
+
+	// Characters that need shift
+	shiftMap := map[rune]uint32{
 		'A': KEY_A, 'B': KEY_B, 'C': KEY_C, 'D': KEY_D, 'E': KEY_E,
 		'F': KEY_F, 'G': KEY_G, 'H': KEY_H, 'I': KEY_I, 'J': KEY_J,
 		'K': KEY_K, 'L': KEY_L, 'M': KEY_M, 'N': KEY_N, 'O': KEY_O,
 		'P': KEY_P, 'Q': KEY_Q, 'R': KEY_R, 'S': KEY_S, 'T': KEY_T,
 		'U': KEY_U, 'V': KEY_V, 'W': KEY_W, 'X': KEY_X, 'Y': KEY_Y,
 		'Z': KEY_Z,
-		'0': KEY_0, '1': KEY_1, '2': KEY_2, '3': KEY_3, '4': KEY_4,
-		'5': KEY_5, '6': KEY_6, '7': KEY_7, '8': KEY_8, '9': KEY_9,
-		' ': KEY_SPACE, '\n': KEY_ENTER, '\t': KEY_TAB,
+		'!': KEY_1, '@': KEY_2, '#': KEY_3, '$': KEY_4, '%': KEY_5,
+		'^': KEY_6, '&': KEY_7, '*': KEY_8, '(': KEY_9, ')': KEY_0,
+		'_': KEY_MINUS, '+': KEY_EQUAL, '{': KEY_LEFTBRACE, '}': KEY_RIGHTBRACE,
+		':': KEY_SEMICOLON, '"': KEY_APOSTROPHE, '~': KEY_GRAVE,
+		'|': KEY_BACKSLASH, '<': KEY_COMMA, '>': KEY_DOT, '?': KEY_SLASH,
 	}
-	
+
 	for _, char := range text {
-		key, ok := keyMap[char]
-		if !ok {
-			continue // Skip unsupported characters
+		var key uint32
+		var needShift bool
+
+		// Check if it needs shift
+		if shiftKey, ok := shiftMap[char]; ok {
+			key = shiftKey
+			needShift = true
+		} else if normalKey, ok := keyMap[char]; ok {
+			key = normalKey
+			needShift = false
+		} else {
+			// Skip unsupported characters
+			continue
 		}
-		
-		// Handle uppercase letters with shift
-		needShift := char >= 'A' && char <= 'Z'
-		
+
 		if needShift {
 			if err := k.PressKey(KEY_LEFTSHIFT); err != nil {
 				return err
 			}
+			time.Sleep(5 * time.Millisecond) // Small delay after shift press
 		}
-		
+
 		if err := k.TypeKey(key); err != nil {
 			return err
 		}
-		
+
 		if needShift {
+			time.Sleep(5 * time.Millisecond) // Small delay before shift release
 			if err := k.ReleaseKey(KEY_LEFTSHIFT); err != nil {
 				return err
 			}
 		}
-		
+
 		// Small delay between characters
 		time.Sleep(20 * time.Millisecond)
 	}
-	
+
 	return nil
 }
