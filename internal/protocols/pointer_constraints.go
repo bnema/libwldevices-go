@@ -42,13 +42,23 @@ func (m *PointerConstraintsManager) LockPointer(surface *wl.Surface, pointer *wl
 	// Opcode 1: lock_pointer
 	const opcode = 1
 
-	// Handle nil region
+	// Handle nil arguments
+	var surfaceProxy wl.Proxy
+	if surface != nil {
+		surfaceProxy = surface
+	}
+
+	var pointerProxy wl.Proxy
+	if pointer != nil {
+		pointerProxy = pointer
+	}
+
 	var regionProxy wl.Proxy
 	if region != nil {
 		regionProxy = region
 	}
 
-	err := m.Context().SendRequest(m, opcode, locked, surface, pointer, regionProxy, lifetime)
+	err := m.Context().SendRequest(m, opcode, locked, surfaceProxy, pointerProxy, regionProxy, lifetime)
 	if err != nil {
 		m.Context().Unregister(locked)
 		return nil, err
@@ -64,13 +74,23 @@ func (m *PointerConstraintsManager) ConfinePointer(surface *wl.Surface, pointer 
 	// Opcode 2: confine_pointer
 	const opcode = 2
 
-	// Handle nil region
+	// Handle nil arguments
+	var surfaceProxy wl.Proxy
+	if surface != nil {
+		surfaceProxy = surface
+	}
+
+	var pointerProxy wl.Proxy
+	if pointer != nil {
+		pointerProxy = pointer
+	}
+
 	var regionProxy wl.Proxy
 	if region != nil {
 		regionProxy = region
 	}
 
-	err := m.Context().SendRequest(m, opcode, confined, surface, pointer, regionProxy, lifetime)
+	err := m.Context().SendRequest(m, opcode, confined, surfaceProxy, pointerProxy, regionProxy, lifetime)
 	if err != nil {
 		m.Context().Unregister(confined)
 		return nil, err
