@@ -449,38 +449,45 @@ type OutputHandlers struct {
 }
 ```
 
-## Testing & Examples
+## Examples & Testing
 
-### Interactive Tests
+### Interactive Examples
 
-The library includes interactive test programs that demonstrate real functionality:
+The library includes comprehensive example programs that demonstrate real functionality:
 
 ```bash
-# Comprehensive test with both mouse and keyboard
-go run tests/inject/main.go
+# Virtual pointer - mouse movement, clicks, and scrolling
+go run examples/virtual_pointer/main.go
 
-# Minimal mouse movement test  
-go run tests/minimal/main.go
+# Virtual keyboard - text typing and key combinations  
+go run examples/virtual_keyboard/main.go
+
+# Monitor detection - display configuration and real-time updates
+go run examples/monitors_ouput/main.go
+
+# Pointer constraints - mouse locking and confinement
+go run examples/pointer_constraints/main.go
 ```
 
-**Note**: These tests require a Wayland compositor that supports virtual input protocols (e.g., Sway, Hyprland).
+**Note**: These examples require a Wayland compositor that supports the respective protocols (e.g., Hyprland, Sway, other wlroots-based compositors).
 
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all unit tests
 go test ./...
 
 # Test specific packages
 go test ./virtual_pointer
 go test ./virtual_keyboard
+go test ./output_management
 go test ./internal/protocols
 
 # Run with coverage
 go test -cover ./...
 
-# Debug protocol communication
-WAYLAND_DEBUG=1 go run tests/minimal/main.go
+# Debug protocol communication with any example
+WAYLAND_DEBUG=1 go run examples/virtual_pointer/main.go
 ```
 
 ## Development Tools
@@ -507,7 +514,7 @@ go run tools/generate.go \
 
 ### Implementation
 
-This library provides **complete, production-ready implementations** of Wayland virtual input protocols. Built on [neurlang/wayland](https://github.com/neurlang/wayland), it handles all the complex Wayland protocol communication automatically.
+This library provides **complete, production-ready implementations** of Wayland virtual input protocols. Built on [WLTurbo](https://github.com/bnema/wlturbo), it handles all the complex Wayland protocol communication automatically with high performance and context-aware operations.
 
 #### Core Components
 
@@ -528,11 +535,12 @@ This library provides **complete, production-ready implementations** of Wayland 
 
 #### Key Features
 
-- **Zero Dependencies** - Only depends on neurlang/wayland
-- **Thread Safe** - Safe for concurrent use
+- **High Performance** - Built on WLTurbo for sub-microsecond latency
+- **Context Aware** - All operations support cancellation and timeouts
 - **Resource Management** - Automatic cleanup and proper object destruction
-- **Error Handling** - Comprehensive error reporting
+- **Error Handling** - Comprehensive error reporting with context
 - **Protocol Compliance** - Fully compliant with Wayland protocol specifications
+- **Production Ready** - Complete implementations, not stubs
 
 ## Protocol Support
 
