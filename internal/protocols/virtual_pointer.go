@@ -1,7 +1,7 @@
 package protocols
 
 import (
-	"github.com/neurlang/wayland/wl"
+	"github.com/bnema/wlturbo/wl"
 )
 
 // Protocol interface names
@@ -18,13 +18,21 @@ type VirtualPointerManager struct {
 // NewVirtualPointerManager creates a new virtual pointer manager
 func NewVirtualPointerManager(ctx *wl.Context) *VirtualPointerManager {
 	manager := &VirtualPointerManager{}
+	// Set the context properly
+	manager.SetContext(ctx)
 	ctx.Register(manager)
 	return manager
 }
 
 // CreateVirtualPointer creates a new virtual pointer
 func (m *VirtualPointerManager) CreateVirtualPointer(seat *wl.Seat) (*VirtualPointer, error) {
-	pointer := NewVirtualPointer(m.Context())
+	// Allocate ID for the new pointer object
+	pointerID := m.Context().AllocateID()
+	
+	pointer := &VirtualPointer{}
+	pointer.SetContext(m.Context())
+	pointer.SetID(pointerID)
+	m.Context().Register(pointer)
 	
 	// Opcode 0: create_virtual_pointer
 	const opcode = 0
@@ -32,7 +40,7 @@ func (m *VirtualPointerManager) CreateVirtualPointer(seat *wl.Seat) (*VirtualPoi
 	// The neurlang/wayland library expects the object itself for new_id parameters
 	err := m.Context().SendRequest(m, opcode, seat, pointer)
 	if err != nil {
-		m.Context().Unregister(pointer.Id())
+		m.Context().Unregister(pointer)
 		return nil, err
 	}
 	
@@ -41,14 +49,20 @@ func (m *VirtualPointerManager) CreateVirtualPointer(seat *wl.Seat) (*VirtualPoi
 
 // CreateVirtualPointerWithOutput creates a new virtual pointer with output (v2)
 func (m *VirtualPointerManager) CreateVirtualPointerWithOutput(seat *wl.Seat, output *wl.Output) (*VirtualPointer, error) {
-	pointer := NewVirtualPointer(m.Context())
+	// Allocate ID for the new pointer object
+	pointerID := m.Context().AllocateID()
+	
+	pointer := &VirtualPointer{}
+	pointer.SetContext(m.Context())
+	pointer.SetID(pointerID)
+	m.Context().Register(pointer)
 	
 	// Opcode 2: create_virtual_pointer_with_output (since version 2)
 	const opcode = 2
 	
 	err := m.Context().SendRequest(m, opcode, seat, output, pointer)
 	if err != nil {
-		m.Context().Unregister(pointer.Id())
+		m.Context().Unregister(pointer)
 		return nil, err
 	}
 	
@@ -61,12 +75,12 @@ func (m *VirtualPointerManager) Destroy() error {
 	const opcode = 1
 	
 	err := m.Context().SendRequest(m, opcode)
-	m.Context().Unregister(m.Id())
+	m.Context().Unregister(m)
 	return err
 }
 
 // Dispatch handles incoming events (virtual pointer manager has no events)
-func (m *VirtualPointerManager) Dispatch(event *wl.Event) {
+func (m *VirtualPointerManager) Dispatch(_ *wl.Event) {
 	// Virtual pointer manager has no events
 }
 
@@ -78,6 +92,8 @@ type VirtualPointer struct {
 // NewVirtualPointer creates a new virtual pointer
 func NewVirtualPointer(ctx *wl.Context) *VirtualPointer {
 	pointer := &VirtualPointer{}
+	// Set the context properly
+	pointer.SetContext(ctx)
 	ctx.Register(pointer)
 	return pointer
 }
@@ -143,11 +159,11 @@ func (p *VirtualPointer) Destroy() error {
 	// Opcode 8: destroy
 	const opcode = 8
 	err := p.Context().SendRequest(p, opcode)
-	p.Context().Unregister(p.Id())
+	p.Context().Unregister(p)
 	return err
 }
 
 // Dispatch handles incoming events (virtual pointer has no events)
-func (p *VirtualPointer) Dispatch(event *wl.Event) {
+func (p *VirtualPointer) Dispatch(_ *wl.Event) {
 	// Virtual pointer has no events
 }

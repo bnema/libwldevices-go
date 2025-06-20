@@ -1,10 +1,10 @@
 package protocols
 
 import (
-	"os"
+	"fmt"
 	"syscall"
 
-	"github.com/neurlang/wayland/wl"
+	"github.com/bnema/wlturbo/wl"
 )
 
 // Protocol interface names for virtual keyboard
@@ -21,29 +21,31 @@ type VirtualKeyboardManager struct {
 // NewVirtualKeyboardManager creates a new virtual keyboard manager
 func NewVirtualKeyboardManager(ctx *wl.Context) *VirtualKeyboardManager {
 	manager := &VirtualKeyboardManager{}
-	ctx.Register(manager)
+	// Set the context properly
+	manager.SetContext(ctx)
+	// Note: Manager ID will be set by Registry.Bind
 	return manager
 }
 
 // CreateVirtualKeyboard creates a new virtual keyboard
 func (m *VirtualKeyboardManager) CreateVirtualKeyboard(seat *wl.Seat) (*VirtualKeyboard, error) {
 	keyboard := NewVirtualKeyboard(m.Context())
-	
+
 	// Opcode 0: create_virtual_keyboard
 	const opcode = 0
-	
+
 	err := m.Context().SendRequest(m, opcode, seat, keyboard)
 	if err != nil {
-		m.Context().Unregister(keyboard.Id())
+		m.Context().Unregister(keyboard)
 		return nil, err
 	}
-	
+
 	return keyboard, nil
 }
 
 // Destroy destroys the virtual keyboard manager (no destructor in protocol)
 func (m *VirtualKeyboardManager) Destroy() error {
-	m.Context().Unregister(m.Id())
+	m.Context().Unregister(m)
 	return nil
 }
 
@@ -60,6 +62,11 @@ type VirtualKeyboard struct {
 // NewVirtualKeyboard creates a new virtual keyboard
 func NewVirtualKeyboard(ctx *wl.Context) *VirtualKeyboard {
 	keyboard := &VirtualKeyboard{}
+	// Set the context properly
+	keyboard.SetContext(ctx)
+	// Allocate and set ID before registering
+	id := ctx.AllocateID()
+	keyboard.SetID(id)
 	ctx.Register(keyboard)
 	return keyboard
 }
@@ -68,15 +75,24 @@ func NewVirtualKeyboard(ctx *wl.Context) *VirtualKeyboard {
 func (k *VirtualKeyboard) Keymap(format uint32, fd int, size uint32) error {
 	// Opcode 0: keymap
 	const opcode = 0
-	
-	// The neurlang/wayland library expects file descriptors as uintptr
-	return k.Context().SendRequest(k, opcode, format, uintptr(fd), size)
+
+	// Debug: verify fd is valid
+	if fd < 0 {
+		return fmt.Errorf("invalid file descriptor: %d", fd)
+	}
+
+	// File descriptors must be sent via SendRequestWithFDs
+	// The fd argument is passed as uintptr for neurlang/wayland compatibility
+	return k.Context().SendRequestWithFDs(k, opcode, []int{fd}, format, uintptr(fd), size)
 }
 
 // Key sends a key press/release event
 func (k *VirtualKeyboard) Key(time, key, state uint32) error {
 	// Opcode 1: key
 	const opcode = 1
+
+	// The virtual keyboard protocol expects raw evdev key codes, NOT XKB key codes
+	// Do NOT add 8 - that's only for XKB keysyms, not for virtual keyboard input
 	return k.Context().SendRequest(k, opcode, time, key, state)
 }
 
@@ -92,7 +108,7 @@ func (k *VirtualKeyboard) Destroy() error {
 	// Opcode 3: destroy
 	const opcode = 3
 	err := k.Context().SendRequest(k, opcode)
-	k.Context().Unregister(k.Id())
+	k.Context().Unregister(k)
 	return err
 }
 
@@ -107,29 +123,47 @@ func CreateDefaultKeymap() (int, uint32, error) {
 	xkb_geometry  { include "pc(pc105)"	};
 };`
 
-	// Create a temporary file
-	file, err := os.CreateTemp("", "keymap-*.xkb")
-	if err != nil {
-		return -1, 0, err
-	}
-	defer file.Close()
-
-	// Write keymap
-	_, err = file.WriteString(keymap)
+	// Create anonymous shared memory file
+	size := len(keymap) + 1 // +1 for null terminator
+	fd, err := wl.CreateAnonymousFile(int64(size))
 	if err != nil {
 		return -1, 0, err
 	}
 
-	// Get file descriptor
-	fd := int(file.Fd())
-
-	// Duplicate the fd so it remains valid after file.Close()
-	newFd, err := syscall.Dup(fd)
+	// Map the memory
+	data, err := wl.MapMemory(fd, size)
 	if err != nil {
+		_ = syscall.Close(fd)
+		return -1, 0, err
+	}
+	defer func() { _ = wl.UnmapMemory(data) }()
+
+	// Copy keymap to shared memory
+	copy(data, keymap)
+	data[len(keymap)] = 0 // null terminator
+
+	// Seek to beginning for compositor to read
+	_, err = syscall.Seek(fd, 0, 0)
+	if err != nil {
+		_ = syscall.Close(fd)
 		return -1, 0, err
 	}
 
-	return newFd, uint32(len(keymap)), nil
+	// Verify the fd is readable
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(fd, &stat); err != nil {
+		_ = syscall.Close(fd)
+		return -1, 0, fmt.Errorf("fstat failed: %w", err)
+	}
+
+	// Return the keymap size INCLUDING null terminator
+	// Wayland expects the full mmap size including the null byte
+	// Safe conversion: size is controlled and small
+	if size < 0 || size > 0x7FFFFFFF {
+		_ = syscall.Close(fd)
+		return -1, 0, fmt.Errorf("invalid keymap size: %d", size)
+	}
+	return fd, uint32(size), nil
 }
 
 // Dispatch handles incoming events (virtual keyboard has no events)
