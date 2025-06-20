@@ -1,27 +1,40 @@
-# Wayland Virtual Input Go Bindings
+# Wayland Devices Go Library
 
-**Production-ready Go bindings for Wayland virtual input protocols** - Control mouse and keyboard input programmatically on Wayland compositors.
+**Go library for Wayland device protocols** - Control virtual inputs, manage pointer constraints, and monitor outputs programmatically on Wayland compositors.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/bnema/wayland-virtual-input-go.svg)](https://pkg.go.dev/github.com/bnema/wayland-virtual-input-go)
-[![Go Report Card](https://goreportcard.com/badge/github.com/bnema/wayland-virtual-input-go)](https://goreportcard.com/report/github.com/bnema/wayland-virtual-input-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/bnema/libwldevices-go.svg)](https://pkg.go.dev/github.com/bnema/libwldevices-go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bnema/libwldevices-go)](https://goreportcard.com/report/github.com/bnema/libwldevices-go)
 
 ## Overview
 
 This library provides **complete, working implementations** for:
-- **Virtual Pointer** (`zwlr_virtual_pointer_v1`): Mouse movement, clicks, and scrolling
-- **Virtual Keyboard** (`zwp_virtual_keyboard_v1`): Keyboard input and key combinations
-- **Pointer Constraints** (`zwp_pointer_constraints_v1`): Lock or confine pointer motion
+- **Virtual Pointer** (`zwlr_virtual_pointer_v1`): Programmatic mouse movement, clicks, and scrolling
+- **Virtual Keyboard** (`zwp_virtual_keyboard_v1`): Programmatic keyboard input and key combinations
+- **Pointer Constraints** (`zwp_pointer_constraints_v1`): Lock or confine pointer motion for gaming/apps
+- **Output Management** (`zwlr_output_management_v1`): Real-time monitor detection and configuration
 
-Built on top of [neurlang/wayland](https://github.com/neurlang/wayland) client library, these bindings enable applications to inject input events directly into Wayland compositors and control pointer behavior.
+Built on top of [WLTurbo](https://github.com/bnema/wlturbo) high-performance Wayland client library, this library enables applications to inject input events, manage pointer behavior, and monitor display configuration in Wayland compositors.
 
 ### Use Cases
+
+**Virtual Input:**
 - **Remote desktop applications** - Forward input from remote clients
 - **Input automation and testing** - Programmatic UI testing
 - **Accessibility tools** - Alternative input methods
 - **Screen sharing applications** - Multi-user input handling
 - **Gaming and simulation** - Synthetic input generation
+
+**Pointer Constraints:**
 - **FPS games** - Lock pointer for mouse-look controls
 - **Creative applications** - Confine pointer to canvas area
+- **Full-screen applications** - Prevent cursor from leaving window
+
+**Output Management:**
+- **Display configuration tools** - Monitor setup and arrangement
+- **Multi-monitor applications** - Adaptive layouts based on screen setup
+- **Remote desktop servers** - Dynamic display detection
+- **Screen sharing applications** - Monitor-aware streaming
+- **Gaming applications** - Resolution and refresh rate optimization
 
 ## Features
 
@@ -50,10 +63,18 @@ Built on top of [neurlang/wayland](https://github.com/neurlang/wayland) client l
 - Event notifications for constraint state changes
 - Region updates while constrained
 
+### Output Management
+- Real-time monitor detection and configuration
+- Monitor position, size, scale, and transform
+- Physical size and refresh rate information
+- Primary monitor detection
+- Event notifications for monitor changes
+- Support for enabled/disabled outputs
+
 ## Installation
 
 ```bash
-go get github.com/bnema/wayland-virtual-input-go
+go get github.com/bnema/libwldevices-go
 ```
 
 ## Quick Start
@@ -68,7 +89,7 @@ import (
     "log"
     "time"
     
-    "github.com/bnema/wayland-virtual-input-go/virtual_pointer"
+    "github.com/bnema/libwldevices-go/virtual_pointer"
 )
 
 func main() {
@@ -117,7 +138,7 @@ import (
     "context"
     "log"
     
-    "github.com/bnema/wayland-virtual-input-go/virtual_keyboard"
+    "github.com/bnema/libwldevices-go/virtual_keyboard"
 )
 
 func main() {
@@ -160,7 +181,7 @@ import (
     "context"
     "log"
     
-    "github.com/bnema/wayland-virtual-input-go/pointer_constraints"
+    "github.com/bnema/libwldevices-go/pointer_constraints"
 )
 
 func main() {
@@ -194,6 +215,63 @@ func main() {
         log.Fatal(err)
     }
     defer confined.Close()
+}
+```
+
+### Output Management Example
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    "github.com/bnema/libwldevices-go/output_management"
+)
+
+func main() {
+    ctx := context.Background()
+    
+    // Create output manager
+    manager, err := output_management.NewOutputManager(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer manager.Close()
+    
+    // Set up event handlers
+    manager.SetHandlers(output_management.OutputHandlers{
+        OnHeadAdded: func(head *output_management.OutputHead) {
+            fmt.Printf("Monitor added: %s at %dx%d\n", 
+                head.Name, head.Position.X, head.Position.Y)
+        },
+        OnHeadRemoved: func(head *output_management.OutputHead) {
+            fmt.Printf("Monitor removed: %s\n", head.Name)
+        },
+        OnConfigurationChanged: func(heads []*output_management.OutputHead) {
+            fmt.Printf("Configuration changed: %d monitors\n", len(heads))
+        },
+    })
+    
+    // Get all monitors
+    heads := manager.GetHeads()
+    for _, head := range heads {
+        if head.Enabled {
+            fmt.Printf("Monitor %s: %dx%d at (%d,%d), scale %.2f\n",
+                head.Name,
+                head.Mode.Width, head.Mode.Height,
+                head.Position.X, head.Position.Y,
+                head.Scale)
+        }
+    }
+    
+    // Find primary monitor
+    primary := manager.GetPrimaryHead()
+    if primary != nil {
+        fmt.Printf("Primary monitor: %s\n", primary.Name)
+    }
 }
 ```
 
@@ -314,6 +392,63 @@ const (
 )
 ```
 
+### Output Management
+
+#### Main Types
+
+```go
+type OutputManager struct {
+    // Manages output configuration and monitoring
+}
+
+type OutputHead struct {
+    ID           uint32
+    Name         string
+    Description  string
+    Enabled      bool
+    Position     Position
+    Mode         *OutputMode
+    Scale        float64
+    Transform    Transform
+}
+
+type OutputMode struct {
+    Width     int32
+    Height    int32
+    Refresh   int32 // in mHz
+    Preferred bool
+}
+```
+
+#### Key Methods
+
+```go
+// Manager creation
+func NewOutputManager(ctx context.Context) (*OutputManager, error)
+func (om *OutputManager) GetHeads() []*OutputHead
+func (om *OutputManager) GetEnabledHeads() []*OutputHead
+func (om *OutputManager) GetHeadByName(name string) *OutputHead
+func (om *OutputManager) GetPrimaryHead() *OutputHead
+func (om *OutputManager) SetHandlers(handlers OutputHandlers)
+func (om *OutputManager) Close() error
+
+// Output head helpers
+func (h *OutputHead) Bounds() (x1, y1, x2, y2 int32)
+func (h *OutputHead) Contains(x, y int32) bool
+func (h *OutputHead) IsPrimary() bool
+func (m *OutputMode) GetRefreshRate() float64
+```
+
+#### Event Handlers
+
+```go
+type OutputHandlers struct {
+    OnHeadAdded            func(head *OutputHead)
+    OnHeadRemoved          func(head *OutputHead)
+    OnConfigurationChanged func(heads []*OutputHead)
+}
+```
+
 ## Testing & Examples
 
 ### Interactive Tests
@@ -417,6 +552,37 @@ This library provides **complete, production-ready implementations** of Wayland 
   - ✅ Modifier state handling
   - ✅ File descriptor passing for keymaps
 
+- **zwlr_output_management_v1** (wlroots output management)
+  - ✅ Real-time monitor detection and updates
+  - ✅ Output position, size, and scale information
+  - ✅ Physical dimensions and refresh rates
+  - ✅ Transform and rotation support
+  - ✅ Primary monitor detection
+  - ✅ Enabled/disabled state tracking
+
+- **zwp_pointer_constraints_v1** (Wayland pointer constraints)
+  - ✅ Lock pointer to current position
+  - ✅ Confine pointer to specified region
+  - ✅ Oneshot and persistent lifetime modes
+  - ✅ Cursor position hints for unlock
+  - ✅ Event notifications for constraint state changes
+  - ✅ Region updates while constrained
+
+### Planned Protocols (Roadmap)
+
+- **zwp_relative_pointer_v1** (Wayland relative pointer) - **Next Priority**
+  - 🔄 Relative pointer motion events
+  - 🔄 High-precision mouse movement for gaming
+  - 🔄 Complementary to pointer constraints for FPS controls
+  - 🔄 Protocol specification: https://wayland.app/protocols/relative-pointer-unstable-v1
+
+- **zwp_keyboard_shortcuts_inhibit_manager_v1** (Keyboard shortcuts inhibitor)
+  - 🔄 Temporarily disable compositor keyboard shortcuts
+  - 🔄 Required for games and remote desktop applications  
+  - 🔄 Allows applications to receive all keyboard events
+  - 🔄 Interface definitions implemented, needs Wayland protocol bindings
+  - 🔄 Protocol specification: https://wayland.app/protocols/keyboard-shortcuts-inhibit-unstable-v1
+
 ### Protocol Implementation Details
 
 - **Proper Wayland Object Lifecycle** - Correct creation, binding, and destruction
@@ -429,30 +595,28 @@ This library provides **complete, production-ready implementations** of Wayland 
 
 Virtual input protocols have significant security implications:
 
-- **Compositor Permission**: Most Wayland compositors require explicit permission or privileged access to create virtual input devices
+- **Compositor Injection**: Your wayland compositor must support the virtual input protocols (zwlr_virtual_pointer_v1 and zwp_virtual_keyboard_v1)
 - **Sandboxing**: Applications may need special permissions or be run outside sandboxes
 - **User Consent**: Consider requiring user consent before creating virtual input devices
-- **Input Validation**: Always validate input parameters to prevent potential security issues
+- **Input Validation**: Always validate input parameters to prevent potential security issues (TODO: implement)
 
 ## Compatibility
 
 ### Wayland Compositors
 
 **Tested and Working:**
-- ✅ **Sway** - Full support for both protocols
-- ✅ **Hyprland** - Full support for both protocols  
-- ✅ **wlroots-based compositors** - Full support
+- ✅ **Hyprland** - Full support 
 
 **Limited/Untested:**
-- ⚠️ **GNOME** - May require additional permissions
-- ⚠️ **KDE Plasma** - Limited virtual input support
-- ❓ **Other compositors** - Check `wayland-info | grep virtual` 
+- ⚠️ **GNOME** (needs testing)
+- ⚠️ **KDE Plasma** (needs testing)
+- ⚠️ **wlroots-based compositors** (needs testing)
 
 ### System Requirements
 
-- **Go 1.19+** (tested on Go 1.20+)
+- **Linux** 
+- **Go 1.24+** (tested on Go 1.24)
 - **Wayland compositor** with virtual input protocol support
-- **Linux** (uses Linux input event codes)
 - **Wayland session** (`XDG_SESSION_TYPE=wayland`)
 
 ### Verification
@@ -460,7 +624,7 @@ Virtual input protocols have significant security implications:
 Check if your compositor supports the required protocols:
 ```bash
 # Check available protocols
-wayland-info | grep -E "(virtual_pointer|virtual_keyboard)"
+wayland-info | grep -E "(virtual_pointer|virtual_keyboard|pointer_constraints|output_management)"
 
 # Should show:
 # zwlr_virtual_pointer_manager_v1
