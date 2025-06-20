@@ -23,7 +23,7 @@ go.work
 *.swp
 *.swo
 *~
-
+.claude/
 # OS files
 .DS_Store
 .DS_Store?
