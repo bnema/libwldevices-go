@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/neurlang/wayland/wl"
+	"github.com/bnema/wlturbo/wl"
 )
 
 // Client manages the Wayland connection and protocol objects
@@ -19,6 +19,7 @@ type Client struct {
 	pointerManager     uint32
 	keyboardManager    uint32
 	constraintsManager uint32
+	outputManager      uint32
 
 	mu      sync.Mutex
 	globals map[uint32]string
@@ -26,10 +27,12 @@ type Client struct {
 
 // NewClient creates a new Wayland client
 func NewClient() (*Client, error) {
+	// fmt.Println("[DEBUG] Connecting to Wayland display...")
 	display, err := wl.Connect("")
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Wayland: %w", err)
 	}
+	// fmt.Println("[DEBUG] Connected to Wayland display successfully")
 	
 	client := &Client{
 		display: display,
@@ -38,33 +41,35 @@ func NewClient() (*Client, error) {
 	}
 	
 	// Get registry
-	registry, err := display.GetRegistry()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get registry: %w", err)
-	}
+	registry := display.GetRegistry()
 	client.registry = registry
 	
-	// Set up registry listener
+	// Set up registry listener BEFORE doing any roundtrips
 	registry.AddGlobalHandler(client)
 	registry.AddGlobalRemoveHandler(client)
 	
-	// Get initial globals
-	sync, err := display.Sync()
-	if err != nil {
-		return nil, fmt.Errorf("failed to sync: %w", err)
+	// Now do a roundtrip to get all globals announced
+	// fmt.Println("[DEBUG] Performing roundtrip to get globals...")
+	if err := display.Roundtrip(); err != nil {
+		return nil, fmt.Errorf("failed to get initial globals: %w", err)
 	}
+	// fmt.Println("[DEBUG] Roundtrip completed, globals should be announced")
 	
-	// Wait for sync
-	err = client.context.RunTill(sync)
-	if err != nil {
-		return nil, fmt.Errorf("failed to wait for sync: %w", err)
-	}
+	// Debug: print all globals we received
+	// client.mu.Lock()
+	// fmt.Printf("[DEBUG] Received %d globals:\n", len(client.globals))
+	// for name, iface := range client.globals {
+	// 	fmt.Printf("[DEBUG]   - %s (name=%d)\n", iface, name)
+	// }
+	// client.mu.Unlock()
 	
 	return client, nil
 }
 
 // HandleRegistryGlobal implements wl.RegistryGlobalHandler
 func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
+	// fmt.Printf("[DEBUG] Global announced: %s v%d (name=%d)\n", event.Interface, event.Version, event.Name)
+	
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	
@@ -73,9 +78,11 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 	switch event.Interface {
 	case "wl_seat":
 		// Bind to seat for virtual input
-		seat := wl.NewSeat(c.context)
-		err := c.registry.Bind(event.Name, event.Interface, event.Version, seat)
+		seatID, err := c.registry.BindID(event.Name, event.Interface, event.Version)
 		if err == nil {
+			seat := wl.NewSeat(c.context)
+			seat.SetID(seatID)
+			c.context.Register(seat)
 			c.seat = seat
 		}
 		
@@ -87,6 +94,10 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 
 	case "zwp_pointer_constraints_v1":
 		c.constraintsManager = event.Name
+		
+	case "zwlr_output_manager_v1":
+		// fmt.Printf("[DEBUG] Setting outputManager to %d\n", event.Name)
+		c.outputManager = event.Name
 	}
 }
 
@@ -158,6 +169,20 @@ func (c *Client) GetConstraintsManagerName() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.constraintsManager
+}
+
+// HasOutputManager returns true if output manager protocol is available
+func (c *Client) HasOutputManager() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.outputManager != 0
+}
+
+// GetOutputManagerName returns the name ID for the output manager
+func (c *Client) GetOutputManagerName() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.outputManager
 }
 
 // Close closes the Wayland connection

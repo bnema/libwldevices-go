@@ -2,7 +2,7 @@
 package protocols
 
 import (
-	"github.com/neurlang/wayland/wl"
+	"github.com/bnema/wlturbo/wl"
 )
 
 // Protocol interface names for pointer constraints
@@ -50,7 +50,7 @@ func (m *PointerConstraintsManager) LockPointer(surface *wl.Surface, pointer *wl
 
 	err := m.Context().SendRequest(m, opcode, locked, surface, pointer, regionProxy, lifetime)
 	if err != nil {
-		m.Context().Unregister(locked.Id())
+		m.Context().Unregister(locked)
 		return nil, err
 	}
 
@@ -72,7 +72,7 @@ func (m *PointerConstraintsManager) ConfinePointer(surface *wl.Surface, pointer 
 
 	err := m.Context().SendRequest(m, opcode, confined, surface, pointer, regionProxy, lifetime)
 	if err != nil {
-		m.Context().Unregister(confined.Id())
+		m.Context().Unregister(confined)
 		return nil, err
 	}
 
@@ -84,12 +84,12 @@ func (m *PointerConstraintsManager) Destroy() error {
 	// Opcode 0: destroy
 	const opcode = 0
 	err := m.Context().SendRequest(m, opcode)
-	m.Context().Unregister(m.Id())
+	m.Context().Unregister(m)
 	return err
 }
 
 // Dispatch handles incoming events
-func (m *PointerConstraintsManager) Dispatch(event *wl.Event) {
+func (m *PointerConstraintsManager) Dispatch(_ *wl.Event) {
 	// Pointer constraints manager has no events
 }
 
@@ -143,7 +143,7 @@ func (l *LockedPointer) Destroy() error {
 	// Opcode 0: destroy
 	const opcode = 0
 	err := l.Context().SendRequest(l, opcode)
-	l.Context().Unregister(l.Id())
+	l.Context().Unregister(l)
 	return err
 }
 
@@ -204,7 +204,7 @@ func (c *ConfinedPointer) Destroy() error {
 	// Opcode 0: destroy
 	const opcode = 0
 	err := c.Context().SendRequest(c, opcode)
-	c.Context().Unregister(c.Id())
+	c.Context().Unregister(c)
 	return err
 }
 
