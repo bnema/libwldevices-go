@@ -9,38 +9,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/bnema/wayland-virtual-input-go/pointer_constraints"
-	"github.com/neurlang/wayland/wl"
+	"github.com/bnema/libwldevices-go/pointer_constraints"
+	"github.com/bnema/wlturbo/wl"
 )
-
-// CustomEventHandler demonstrates handling constraint events in your application
-type CustomEventHandler struct {
-	app *Application
-}
-
-func (h *CustomEventHandler) HandleLocked(e pointer_constraints.LockedEvent) {
-	log.Println("Pointer locked - hiding cursor and capturing input")
-	h.app.onPointerLocked()
-}
-
-func (h *CustomEventHandler) HandleUnlocked(e pointer_constraints.UnlockedEvent) {
-	log.Println("Pointer unlocked - showing cursor")
-	h.app.onPointerUnlocked()
-
-	if e.Lifetime == pointer_constraints.LifetimeOneshot {
-		log.Println("Lock was oneshot - constraint is now defunct")
-	}
-}
-
-func (h *CustomEventHandler) HandleConfined(e pointer_constraints.ConfinedEvent) {
-	log.Println("Pointer confined to region")
-	h.app.onPointerConfined()
-}
-
-func (h *CustomEventHandler) HandleUnconfined(e pointer_constraints.UnconfinedEvent) {
-	log.Println("Pointer no longer confined")
-	h.app.onPointerUnconfined()
-}
 
 // Application represents your Wayland application
 type Application struct {
@@ -68,17 +39,17 @@ func (app *Application) enableFPSControls() error {
 		return fmt.Errorf("failed to lock pointer: %w", err)
 	}
 
-	// Set event handler
-	handler := &CustomEventHandler{app: app}
-	lock.SetEventHandler(handler)
-
 	// Store the lock
 	app.currentLock = lock
 
 	// Set hint for where cursor should appear when unlocked
 	// (e.g., center of window)
-	lock.SetCursorPositionHint(400.0, 300.0)
+	err = lock.SetCursorPositionHint(400.0, 300.0)
+	if err != nil {
+		log.Printf("Warning: failed to set cursor position hint: %v", err)
+	}
 
+	log.Println("Pointer locked for FPS controls")
 	return nil
 }
 
@@ -89,7 +60,9 @@ func (app *Application) confineToCanvas(x, y, width, height int32) error {
 	if err != nil {
 		return fmt.Errorf("failed to create region: %w", err)
 	}
-	region.Add(x, y, width, height)
+	if err := region.Add(x, y, width, height); err != nil {
+		return fmt.Errorf("failed to add region: %w", err)
+	}
 
 	// Confine pointer to canvas
 	confinement, err := app.constraintManager.ConfinePointer(
@@ -102,11 +75,8 @@ func (app *Application) confineToCanvas(x, y, width, height int32) error {
 		return fmt.Errorf("failed to confine pointer: %w", err)
 	}
 
-	// Set event handler
-	handler := &CustomEventHandler{app: app}
-	confinement.SetEventHandler(handler)
-
 	app.currentConfinement = confinement
+	log.Printf("Pointer confined to canvas area (%d,%d %dx%d)", x, y, width, height)
 	return nil
 }
 
@@ -122,8 +92,10 @@ func (app *Application) setupEdgeScrolling() error {
 	if err != nil {
 		return fmt.Errorf("failed to create region: %w", err)
 	}
-	region.Add(scrollMargin, scrollMargin,
-		windowWidth-2*scrollMargin, windowHeight-2*scrollMargin)
+	if err := region.Add(scrollMargin, scrollMargin,
+		windowWidth-2*scrollMargin, windowHeight-2*scrollMargin); err != nil {
+		return fmt.Errorf("failed to add region: %w", err)
+	}
 
 	// Use oneshot confinement - releases when user wants to scroll
 	confinement, err := app.constraintManager.ConfinePointer(
@@ -136,76 +108,115 @@ func (app *Application) setupEdgeScrolling() error {
 		return fmt.Errorf("failed to setup edge scrolling: %w", err)
 	}
 
-	confinement.SetEventHandler(&CustomEventHandler{app: app})
 	app.currentConfinement = confinement
-
+	log.Println("Edge scrolling setup complete")
 	return nil
 }
 
-// Example 4: Toggle pointer lock with hotkey
-func (app *Application) togglePointerLock() {
-	if app.currentLock != nil && app.currentLock.IsActive() {
+// Example 4: Toggle pointer lock
+func (app *Application) togglePointerLock() error {
+	if app.currentLock != nil {
 		// Unlock pointer
-		app.currentLock.Close()
+		err := app.currentLock.Destroy()
+		if err != nil {
+			log.Printf("Warning: failed to destroy lock: %v", err)
+		}
 		app.currentLock = nil
 		log.Println("Pointer unlocked")
 	} else {
-		// Lock pointer
+		// Lock pointer using convenience function
 		lock, err := pointer_constraints.LockPointerAtCurrentPosition(
 			app.constraintManager,
 			app.surface,
 			app.pointer,
 		)
 		if err != nil {
-			log.Printf("Failed to lock pointer: %v", err)
-			return
+			return fmt.Errorf("failed to lock pointer: %w", err)
 		}
 
-		lock.SetEventHandler(&CustomEventHandler{app: app})
 		app.currentLock = lock
 		log.Println("Pointer locked")
 	}
+	return nil
 }
 
-// Callbacks for constraint state changes
-func (app *Application) onPointerLocked() {
-	// Hide cursor sprite
-	// Start capturing relative motion events
-	// Update UI to show locked state
+// Example 5: Confine pointer to a specific region
+func (app *Application) confineToRegion(x, y, width, height int32) error {
+	// Create the region
+	region, err := app.compositor.CreateRegion()
+	if err != nil {
+		return fmt.Errorf("failed to create region: %w", err)
+	}
+	if err := region.Add(x, y, width, height); err != nil {
+		return fmt.Errorf("failed to add region: %w", err)
+	}
+
+	// Use convenience function to confine pointer
+	confinement, err := pointer_constraints.ConfinePointerToRegion(
+		app.constraintManager,
+		app.surface,
+		app.pointer,
+		region,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to confine pointer to region: %w", err)
+	}
+
+	app.currentConfinement = confinement
+	log.Printf("Pointer confined to region (%d,%d %dx%d)", x, y, width, height)
+	return nil
 }
 
-func (app *Application) onPointerUnlocked() {
-	// Show cursor sprite
-	// Stop relative motion capture
-	// Update UI to show unlocked state
+// Example 6: Update confinement region
+func (app *Application) updateConfinementRegion(x, y, width, height int32) error {
+	if app.currentConfinement == nil {
+		return fmt.Errorf("no active confinement to update")
+	}
+
+	// Create new region
+	region, err := app.compositor.CreateRegion()
+	if err != nil {
+		return fmt.Errorf("failed to create region: %w", err)
+	}
+	if err := region.Add(x, y, width, height); err != nil {
+		return fmt.Errorf("failed to add region: %w", err)
+	}
+
+	// Update the confinement region
+	err = app.currentConfinement.SetRegion(region)
+	if err != nil {
+		return fmt.Errorf("failed to update confinement region: %w", err)
+	}
+
+	log.Printf("Confinement region updated to (%d,%d %dx%d)", x, y, width, height)
+	return nil
 }
 
-func (app *Application) onPointerConfined() {
-	// Update UI to show confined state
-	// Maybe show visual boundaries
+// Clean up all constraints
+func (app *Application) cleanup() {
+	if app.currentLock != nil {
+		if err := app.currentLock.Destroy(); err != nil {
+			log.Printf("Warning: failed to destroy lock: %v", err)
+		}
+		app.currentLock = nil
+	}
+
+	if app.currentConfinement != nil {
+		if err := app.currentConfinement.Destroy(); err != nil {
+			log.Printf("Warning: failed to destroy confinement: %v", err)
+		}
+		app.currentConfinement = nil
+	}
+
+	if app.constraintManager != nil {
+		if err := app.constraintManager.Close(); err != nil {
+			log.Printf("Warning: failed to close constraint manager: %v", err)
+		}
+	}
 }
 
-func (app *Application) onPointerUnconfined() {
-	// Update UI to show unconfined state
-	// Remove visual boundaries
-}
-
-func main() {
-	fmt.Println("=== Pointer Constraints Integration Example ===")
-	fmt.Println()
-	fmt.Println("This example demonstrates how to integrate pointer constraints")
-	fmt.Println("into your Wayland application. The code shows common use cases:")
-	fmt.Println()
-	fmt.Println("1. FPS game controls (pointer locking)")
-	fmt.Println("2. Drawing application (confine to canvas)")
-	fmt.Println("3. RTS edge scrolling (confinement with zones)")
-	fmt.Println("4. Toggle lock with hotkey")
-	fmt.Println()
-	fmt.Println("To use these examples:")
-	fmt.Println("1. Get wl.Surface from your window")
-	fmt.Println("2. Get wl.Pointer from seat capabilities")
-	fmt.Println("3. Create constraint manager")
-	fmt.Println("4. Apply constraints as needed")
+func demonstrateAPI() {
+	fmt.Println("=== Pointer Constraints API Demonstration ===")
 	fmt.Println()
 
 	// Show how to create the manager
@@ -214,16 +225,125 @@ func main() {
 	if err != nil {
 		log.Printf("Note: %v", err)
 		log.Println("This is expected if running outside a Wayland session")
-	} else {
-		defer manager.Close()
-		log.Println("✓ Pointer constraints manager created successfully")
+		fmt.Println()
+		fmt.Println("In a real application, you would:")
+		fmt.Println("1. Get wl.Surface from your window toolkit")
+		fmt.Println("2. Get wl.Pointer from seat capabilities")
+		fmt.Println("3. Create regions as needed")
+		fmt.Println("4. Apply constraints using the manager")
+		return
+	}
+	defer func() { _ = manager.Close() }()
+
+	log.Println("✓ Pointer constraints manager created successfully")
+
+	// Test basic functionality (without real Wayland objects)
+	fmt.Println()
+	fmt.Println("Testing API with nil arguments (should handle gracefully):")
+
+	// Test lock pointer with invalid arguments
+	_, err = manager.LockPointer(nil, nil, nil, pointer_constraints.LifetimeOneshot)
+	if err != nil {
+		fmt.Printf("  LockPointer with nil args: %v\n", err)
 	}
 
+	// Test confine pointer with invalid arguments
+	_, err = manager.ConfinePointer(nil, nil, nil, pointer_constraints.LifetimePersistent)
+	if err != nil {
+		fmt.Printf("  ConfinePointer with nil args: %v\n", err)
+	}
+
+	// Test convenience functions
+	_, err = pointer_constraints.LockPointerAtCurrentPosition(manager, nil, nil)
+	if err != nil {
+		fmt.Printf("  LockPointerAtCurrentPosition: %v\n", err)
+	}
+
+	_, err = pointer_constraints.LockPointerPersistent(manager, nil, nil)
+	if err != nil {
+		fmt.Printf("  LockPointerPersistent: %v\n", err)
+	}
+
+	_, err = pointer_constraints.ConfinePointerToRegion(manager, nil, nil, nil)
+	if err != nil {
+		fmt.Printf("  ConfinePointerToRegion: %v\n", err)
+	}
+
+	fmt.Println("✓ API responds correctly to invalid arguments")
+}
+
+func main() {
+	fmt.Println("Pointer Constraints Integration Example")
+	fmt.Println("=====================================")
 	fmt.Println()
-	fmt.Println("Key points:")
-	fmt.Println("- Constraints only activate when surface has pointer focus")
-	fmt.Println("- Only one constraint per surface/seat at a time")
-	fmt.Println("- Compositor decides when to activate constraints")
-	fmt.Println("- Use event handlers to track constraint state")
-	fmt.Println("- Remember to close constraints when done")
+	fmt.Println("This example demonstrates how to integrate pointer constraints")
+	fmt.Println("into your Wayland application. The code shows common use cases:")
+	fmt.Println()
+	fmt.Println("1. FPS game controls (pointer locking)")
+	fmt.Println("2. Drawing application (confine to canvas)")
+	fmt.Println("3. RTS edge scrolling (confinement with zones)")
+	fmt.Println("4. Toggle lock functionality")
+	fmt.Println("5. Dynamic region updates")
+	fmt.Println()
+
+	demonstrateAPI()
+
+	fmt.Println()
+	fmt.Println("Key Integration Points:")
+	fmt.Println("======================")
+	fmt.Println()
+	fmt.Println("1. **Lifetime Management**")
+	fmt.Println("   - LifetimeOneshot: Constraint destroyed on first unlock/unconfine")
+	fmt.Println("   - LifetimePersistent: Constraint persists across state changes")
+	fmt.Println()
+	fmt.Println("2. **Error Handling**")
+	fmt.Println("   - Always check errors when creating constraints")
+	fmt.Println("   - Handle ERROR_ALREADY_CONSTRAINED gracefully")
+	fmt.Println("   - Constraints may fail if surface doesn't have focus")
+	fmt.Println()
+	fmt.Println("3. **Resource Cleanup**")
+	fmt.Println("   - Call Destroy() on constraints when done")
+	fmt.Println("   - Close the manager when application exits")
+	fmt.Println("   - Check for nil before calling methods")
+	fmt.Println()
+	fmt.Println("4. **Integration with Window Toolkit**")
+	fmt.Println("   - Get wl.Surface from your window")
+	fmt.Println("   - Get wl.Pointer from seat capabilities")
+	fmt.Println("   - Create wl.Region objects for confinement areas")
+	fmt.Println("   - Handle constraint activation based on focus events")
+	fmt.Println()
+	fmt.Println("5. **Best Practices**")
+	fmt.Println("   - Only one constraint per surface/seat at a time")
+	fmt.Println("   - Constraints only activate when surface has pointer focus")
+	fmt.Println("   - Compositor decides when to actually activate constraints")
+	fmt.Println("   - Provide user feedback about constraint state")
+	fmt.Println("   - Always provide an escape mechanism (hotkey, etc.)")
+	fmt.Println()
+	fmt.Println("Example Usage in Your Application:")
+	fmt.Println("=================================")
+	fmt.Println(`
+// Initialize
+ctx := context.Background()
+manager, err := pointer_constraints.NewPointerConstraintsManager(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+defer manager.Close()
+
+// Lock pointer for FPS controls
+lock, err := manager.LockPointer(surface, pointer, nil, 
+    pointer_constraints.LifetimePersistent)
+if err != nil {
+    log.Printf("Failed to lock pointer: %v", err)
+    return
+}
+
+// Set cursor position hint
+lock.SetCursorPositionHint(centerX, centerY)
+
+// Later, unlock
+lock.Destroy()
+`)
+	fmt.Println()
+	fmt.Println("For complete integration examples, see the Application struct methods above.")
 }

@@ -16,7 +16,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/bnema/wayland-virtual-input-go/virtual_pointer"
+	"github.com/bnema/libwldevices-go/virtual_pointer"
 )
 
 func main() {
@@ -33,22 +33,23 @@ func main() {
 		log.Fatalf("Failed to create virtual pointer manager: %v", err)
 	}
 	defer func() {
-		fmt.Println("9. Destroying virtual pointer manager...")
-		if err := manager.Destroy(); err != nil {
-			log.Printf("Error destroying manager: %v", err)
+		fmt.Println("9. Closing virtual pointer manager...")
+		if err := manager.Close(); err != nil {
+			log.Printf("Error closing manager: %v", err)
 		}
 	}()
 
 	// Create a virtual pointer
 	fmt.Println("2. Creating virtual pointer...")
-	pointer, err := manager.CreateVirtualPointer(nil)
+	pointer, err := manager.CreatePointer()
 	if err != nil {
-		log.Fatalf("Failed to create virtual pointer: %v", err)
+		log.Printf("Failed to create virtual pointer: %v", err)
+		return
 	}
 	defer func() {
-		fmt.Println("8. Destroying virtual pointer...")
-		if err := pointer.Destroy(); err != nil {
-			log.Printf("Error destroying pointer: %v", err)
+		fmt.Println("8. Closing virtual pointer...")
+		if err := pointer.Close(); err != nil {
+			log.Printf("Error closing pointer: %v", err)
 		}
 	}()
 
@@ -65,7 +66,7 @@ func main() {
 
 	for _, move := range movements {
 		fmt.Printf("   - %s\n", move.desc)
-		if err := virtual_pointer.MoveRelative(pointer, move.dx, move.dy); err != nil {
+		if err := pointer.MoveRelative(move.dx, move.dy); err != nil {
 			log.Printf("Error moving pointer: %v", err)
 		}
 		time.Sleep(500 * time.Millisecond) // Brief pause between movements
@@ -84,7 +85,12 @@ func main() {
 
 	for _, move := range absMovements {
 		fmt.Printf("   - %s\n", move.desc)
-		if err := virtual_pointer.MoveAbsolute(pointer, move.x, move.y, move.xExtent, move.yExtent); err != nil {
+		// Note: MoveAbsolute is not a helper method, using MotionAbsolute directly
+		if err := pointer.MotionAbsolute(time.Now(), move.x, move.y, move.xExtent, move.yExtent); err != nil {
+			log.Printf("Error moving pointer absolutely: %v", err)
+			continue
+		}
+		if err := pointer.Frame(); err != nil {
 			log.Printf("Error moving pointer absolutely: %v", err)
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -103,7 +109,17 @@ func main() {
 
 	for _, click := range clicks {
 		fmt.Printf("   - %s\n", click.desc)
-		if err := virtual_pointer.Click(pointer, click.button); err != nil {
+		// Generic click helper
+		now := time.Now()
+		if err := pointer.Button(now, click.button, virtual_pointer.ButtonStatePressed); err != nil {
+			log.Printf("Error pressing button: %v", err)
+			continue
+		}
+		if err := pointer.Button(now, click.button, virtual_pointer.ButtonStateReleased); err != nil {
+			log.Printf("Error releasing button: %v", err)
+			continue
+		}
+		if err := pointer.Frame(); err != nil {
 			log.Printf("Error clicking button: %v", err)
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -124,7 +140,11 @@ func main() {
 
 	for _, scroll := range scrolls {
 		fmt.Printf("   - %s\n", scroll.desc)
-		if err := virtual_pointer.Scroll(pointer, scroll.axis, scroll.value); err != nil {
+		if err := pointer.Axis(time.Now(), virtual_pointer.Axis(scroll.axis), scroll.value); err != nil {
+			log.Printf("Error scrolling: %v", err)
+			continue
+		}
+		if err := pointer.Frame(); err != nil {
 			log.Printf("Error scrolling: %v", err)
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -150,13 +170,22 @@ func main() {
 	for _, step := range square {
 		if step.dx != 0 || step.dy != 0 {
 			fmt.Printf("     Moving by (%.0f, %.0f)\n", step.dx, step.dy)
-			if err := virtual_pointer.MoveRelative(pointer, step.dx, step.dy); err != nil {
+			if err := pointer.MoveRelative(step.dx, step.dy); err != nil {
 				log.Printf("Error moving: %v", err)
 			}
 		}
 		if step.click {
 			fmt.Printf("     Clicking\n")
-			if err := virtual_pointer.Click(pointer, virtual_pointer.BTN_LEFT); err != nil {
+			now := time.Now()
+			if err := pointer.Button(now, virtual_pointer.BTN_LEFT, virtual_pointer.ButtonStatePressed); err != nil {
+				log.Printf("Error clicking: %v", err)
+				continue
+			}
+			if err := pointer.Button(now, virtual_pointer.BTN_LEFT, virtual_pointer.ButtonStateReleased); err != nil {
+				log.Printf("Error clicking: %v", err)
+				continue
+			}
+			if err := pointer.Frame(); err != nil {
 				log.Printf("Error clicking: %v", err)
 			}
 		}
@@ -165,7 +194,7 @@ func main() {
 
 	// Demonstrate drag operation
 	fmt.Println("   - Simulating drag operation (press, move, release)")
-	if err := pointer.ButtonPress(virtual_pointer.BTN_LEFT); err != nil {
+	if err := pointer.Button(time.Now(), virtual_pointer.BTN_LEFT, virtual_pointer.ButtonStatePressed); err != nil {
 		log.Printf("Error pressing button for drag: %v", err)
 	} else {
 		// Move while button is held down
@@ -180,9 +209,9 @@ func main() {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		
+
 		// Release the button
-		if err := pointer.ButtonRelease(virtual_pointer.BTN_LEFT); err != nil {
+		if err := pointer.Button(time.Now(), virtual_pointer.BTN_LEFT, virtual_pointer.ButtonStateReleased); err != nil {
 			log.Printf("Error releasing button after drag: %v", err)
 		}
 		if err := pointer.Frame(); err != nil {
@@ -191,12 +220,10 @@ func main() {
 	}
 
 	fmt.Println("\nExample completed successfully!")
-	fmt.Println("Note: In a real Wayland environment, these operations would")
-	fmt.Println("actually move the mouse cursor and perform clicks/scrolls.")
 }
 
 // demonstrateAdvancedFeatures shows more advanced virtual pointer features
-func demonstrateAdvancedFeatures(pointer virtual_pointer.VirtualPointer) {
+func demonstrateAdvancedFeatures(pointer *virtual_pointer.VirtualPointer) {
 	fmt.Println("Advanced Features:")
 
 	// Set different axis sources
@@ -213,25 +240,25 @@ func demonstrateAdvancedFeatures(pointer virtual_pointer.VirtualPointer) {
 
 	for _, src := range sources {
 		fmt.Printf("     Setting axis source: %s\n", src.desc)
-		if err := pointer.AxisSource(src.source); err != nil {
+		if err := pointer.AxisSource(virtual_pointer.AxisSource(src.source)); err != nil {
 			log.Printf("Error setting axis source: %v", err)
 		}
-		
+
 		// Send a small scroll with this source
-		if err := pointer.Axis(time.Now(), virtual_pointer.AXIS_VERTICAL_SCROLL, 1.0); err != nil {
+		if err := pointer.Axis(time.Now(), virtual_pointer.AxisVertical, 1.0); err != nil {
 			log.Printf("Error sending axis event: %v", err)
 		}
 		if err := pointer.Frame(); err != nil {
 			log.Printf("Error sending frame: %v", err)
 		}
-		
+
 		time.Sleep(200 * time.Millisecond)
 	}
 
 	// Demonstrate discrete scrolling
 	fmt.Println("   - Discrete scrolling (scroll wheel clicks)")
 	for i := 0; i < 3; i++ {
-		if err := pointer.AxisDiscrete(time.Now(), virtual_pointer.AXIS_VERTICAL_SCROLL, 10.0, 1); err != nil {
+		if err := pointer.AxisDiscrete(time.Now(), virtual_pointer.AxisVertical, 10.0, 1); err != nil {
 			log.Printf("Error with discrete scroll: %v", err)
 		}
 		if err := pointer.Frame(); err != nil {
@@ -242,7 +269,7 @@ func demonstrateAdvancedFeatures(pointer virtual_pointer.VirtualPointer) {
 
 	// Demonstrate axis stop
 	fmt.Println("   - Stopping scroll axis")
-	if err := pointer.AxisStop(time.Now(), virtual_pointer.AXIS_VERTICAL_SCROLL); err != nil {
+	if err := pointer.AxisStop(time.Now(), virtual_pointer.AxisVertical); err != nil {
 		log.Printf("Error stopping axis: %v", err)
 	}
 	if err := pointer.Frame(); err != nil {
