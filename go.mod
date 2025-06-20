@@ -1,10 +1,7 @@
-module github.com/bnema/wayland-virtual-input-go
+module github.com/bnema/libwldevices-go
 
-go 1.21
+go 1.24
 
-require github.com/neurlang/wayland v0.2.1
+require github.com/bnema/wlturbo v0.1.0
 
-require (
-	github.com/yalue/native_endian v1.0.2 // indirect
-	golang.org/x/sys v0.21.0 // indirect
-)
+require golang.org/x/sys v0.33.0 // indirect
