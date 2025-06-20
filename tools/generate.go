@@ -1,11 +1,13 @@
 // Package main provides a code generator for Wayland virtual input protocol bindings.
 //
 // This tool parses Wayland protocol XML files and generates Go bindings for them.
-// It supports generating bindings for both virtual pointer and virtual keyboard protocols.
+// It supports generating bindings for virtual pointer, virtual keyboard, pointer constraints,
+// and output management protocols.
 //
 // Usage:
 //   go run tools/generate.go -protocol=virtual_pointer -xml=path/to/protocol.xml -output=path/to/output.go
 //   go run tools/generate.go -protocol=virtual_keyboard -xml=path/to/protocol.xml -output=path/to/output.go
+//   go run tools/generate.go -protocol=output_management -xml=path/to/protocol.xml -output=path/to/output.go
 //
 // The generator creates Go interfaces and implementation stubs based on the protocol
 // specification, making it easier to maintain consistency between the protocol and
@@ -27,10 +29,11 @@ import (
 
 // ProtocolXML represents the root element of a Wayland protocol XML file
 type ProtocolXML struct {
-	XMLName   xml.Name      `xml:"protocol"`
-	Name      string        `xml:"name,attr"`
-	Copyright string        `xml:"copyright"`
-	Interfaces []Interface  `xml:"interface"`
+	XMLName     xml.Name      `xml:"protocol"`
+	Name        string        `xml:"name,attr"`
+	Copyright   string        `xml:"copyright"`
+	Description Description   `xml:"description"`
+	Interfaces  []Interface  `xml:"interface"`
 }
 
 // Interface represents a Wayland protocol interface
@@ -164,8 +167,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *protocolFlag != "virtual_pointer" && *protocolFlag != "virtual_keyboard" && *protocolFlag != "pointer_constraints" {
-		fmt.Fprintf(os.Stderr, "Error: -protocol must be 'virtual_pointer', 'virtual_keyboard', or 'pointer_constraints'\n")
+	if *protocolFlag != "virtual_pointer" && *protocolFlag != "virtual_keyboard" && *protocolFlag != "pointer_constraints" && *protocolFlag != "output_management" {
+		fmt.Fprintf(os.Stderr, "Error: -protocol must be 'virtual_pointer', 'virtual_keyboard', 'pointer_constraints', or 'output_management'\n")
 		os.Exit(1)
 	}
 
@@ -201,15 +204,26 @@ func showHelp() {
 	fmt.Println("    -protocol=virtual_keyboard \\")
 	fmt.Println("    -xml=path/to/virtual-keyboard-unstable-v1.xml \\")
 	fmt.Println("    -output=virtual_keyboard/generated.go")
+	fmt.Println()
+	fmt.Println("  # Generate output management bindings")
+	fmt.Println("  go run tools/generate.go \\")
+	fmt.Println("    -protocol=output_management \\")
+	fmt.Println("    -xml=path/to/wlr-output-management-unstable-v1.xml \\")
+	fmt.Println("    -output=output_management/generated.go")
 }
 
 func generateBindings(protocol, xmlPath, outputPath, packageName string) error {
+	// Basic path validation to prevent path traversal
+	if strings.Contains(xmlPath, "..") || strings.Contains(outputPath, "..") {
+		return fmt.Errorf("invalid path: path traversal not allowed")
+	}
+	
 	// Read and parse the XML file
 	xmlFile, err := os.Open(xmlPath)
 	if err != nil {
 		return fmt.Errorf("failed to open XML file: %v", err)
 	}
-	defer xmlFile.Close()
+	defer func() { _ = xmlFile.Close() }()
 
 	xmlData, err := io.ReadAll(xmlFile)
 	if err != nil {
@@ -229,8 +243,8 @@ func generateBindings(protocol, xmlPath, outputPath, packageName string) error {
 	// Process the protocol data
 	templateData := processProtocolData(protocolXML, packageName)
 
-	// Create output directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+	// Create output directory if it doesn't exist with secure permissions
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0750); err != nil {
 		return fmt.Errorf("failed to create output directory: %v", err)
 	}
 
@@ -239,7 +253,7 @@ func generateBindings(protocol, xmlPath, outputPath, packageName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %v", err)
 	}
-	defer outputFile.Close()
+	defer func() { _ = outputFile.Close() }()
 
 	tmpl := template.Must(template.New("bindings").Funcs(templateFuncs).Parse(bindingTemplate))
 	if err := tmpl.Execute(outputFile, templateData); err != nil {
@@ -380,17 +394,43 @@ func waylandTypeToGo(waylandType string) string {
 }
 
 var templateFuncs = template.FuncMap{
-	"title": strings.Title,
+	"title": func(s string) string {
+		if s == "" {
+			return s
+		}
+		return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
+	},
 	"lower": strings.ToLower,
 	"upper": strings.ToUpper,
+	"formatComment": formatComment,
+	"firstLine": firstLine,
+}
+
+// firstLine returns the first line of a string
+func firstLine(s string) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0])
+	}
+	return s
+}
+
+// formatComment formats a multi-line string for use in Go comments
+func formatComment(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	result := make([]string, len(lines))
+	for i, line := range lines {
+		result[i] = "// " + strings.TrimSpace(line)
+	}
+	return strings.Join(result, "\n")
 }
 
 const bindingTemplate = `// Code generated by tools/generate.go. DO NOT EDIT.
 // Source: {{.Protocol.Name}}
 
-// Package {{.PackageName}} provides Go bindings for the {{.Protocol.Name}} Wayland protocol.
-{{if .Protocol.Description.Text}}//
-// {{.Protocol.Description.Text}}{{end}}
+// Package {{.PackageName}} provides Go bindings for the {{.Protocol.Name}} Wayland protocol.{{if .Protocol.Description.Text}}
+//
+// {{.Protocol.Description.Summary}}{{end}}
 package {{.PackageName}}
 
 import (
@@ -406,10 +446,10 @@ import (
 {{end}}
 
 {{range .Interfaces}}
-// {{.GoName}} represents the {{.Name}} interface.
-{{if .Description}}// {{.Description}}{{end}}
+// {{.GoName}} represents the {{.Name}} interface.{{if .Description}}
+{{formatComment .Description}}{{end}}
 type {{.GoName}} interface {
-{{range .Requests}}	// {{.GoName}}{{if .Description}} {{.Description}}{{end}}
+{{range .Requests}}	// {{.GoName}}{{if .Description}} - {{firstLine .Description}}{{end}}
 	{{.GoName}}({{range $i, $arg := .Args}}{{if $i}}, {{end}}{{$arg.GoName}} {{$arg.GoType}}{{end}}) error
 {{end}}
 }
@@ -426,6 +466,7 @@ func (e *Error) Error() string {
 }
 
 {{range .Interfaces}}
+{{$ifaceName := .GoName}}
 // {{lower .GoName}} is the concrete implementation of {{.GoName}}.
 type {{lower .GoName}} struct {
 	active bool
@@ -445,7 +486,7 @@ func New{{.GoName}}(ctx context.Context) ({{.GoName}}, error) {
 }
 
 {{range .Requests}}
-func (obj *{{lower $.GoName}}) {{.GoName}}({{range $i, $arg := .Args}}{{if $i}}, {{end}}{{$arg.GoName}} {{$arg.GoType}}{{end}}) error {
+func (obj *{{lower $ifaceName}}) {{.GoName}}({{range $i, $arg := .Args}}{{if $i}}, {{end}}{{$arg.GoName}} {{$arg.GoType}}{{end}}) error {
 	if !obj.active {
 		return &Error{
 			Code:    -1,

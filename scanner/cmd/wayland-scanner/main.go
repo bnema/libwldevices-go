@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/bnema/wayland-virtual-input-go/scanner"
+	"github.com/bnema/libwldevices-go/scanner"
 )
 
 func main() {
@@ -102,8 +102,8 @@ func main() {
 		log.Fatalf("Failed to generate code: %v", err)
 	}
 
-	// Write output
-	if err := os.WriteFile(outputPath, code, 0644); err != nil {
+	// Write output with secure permissions
+	if err := os.WriteFile(outputPath, code, 0600); err != nil {
 		log.Fatalf("Failed to write output: %v", err)
 	}
 

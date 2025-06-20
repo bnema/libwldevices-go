@@ -104,11 +104,15 @@ func NewScanner() *Scanner {
 
 // ParseXML parses a Wayland protocol XML file
 func (s *Scanner) ParseXML(path string) error {
+	// Basic path validation to prevent path traversal
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("invalid path: path traversal not allowed")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("failed to open XML file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	data, err := io.ReadAll(file)
 	if err != nil {
@@ -479,7 +483,12 @@ func (s *Scanner) formatDescription(desc *Description) string {
 func (s *Scanner) templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"lower": strings.ToLower,
-		"title": strings.Title,
+		"title": func(s string) string {
+			if s == "" {
+				return s
+			}
+			return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
+		},
 		"hasPrefix": strings.HasPrefix,
 		"trimPrefix": strings.TrimPrefix,
 		"quote": strconv.Quote,
