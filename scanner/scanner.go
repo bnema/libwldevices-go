@@ -155,20 +155,21 @@ func (s *Scanner) Generate(packageName string) ([]byte, error) {
 
 // templateData holds data for template generation
 type templateData struct {
-	Package    string
-	Protocol   string
-	Source     string
-	Imports    []string
-	Constants  []constantData
-	Interfaces []interfaceData
+	Package     string
+	Protocol    string
+	Source      string
+	ImportBlock string
+	Constants   []constantData
+	Interfaces  []interfaceData
 }
 
 type interfaceData struct {
-	Name     string
-	GoName   string
-	Version  int
-	Requests []requestData
-	Events   []eventData
+	Name      string
+	GoName    string
+	Version   int
+	HasEvents bool
+	Requests  []requestData
+	Events    []eventData
 }
 
 type requestData struct {
@@ -197,13 +198,14 @@ type argSlot struct {
 }
 
 type eventData struct {
-	Name          string
-	GoName        string
-	Opcode        int
-	HandlerField  string
-	HandlerParams string
-	HandlerArgs   string
-	DecodeLines   []string
+	Name            string
+	GoName          string
+	Opcode          int
+	HandlerField    string
+	HandlerAccessor string
+	HandlerParams   string
+	HandlerArgs     string
+	DecodeLines     []string
 }
 
 type constantData struct {
@@ -242,8 +244,11 @@ func (s *Scanner) prepareTemplateData(packageName string) (templateData, error) 
 		Package:  packageName,
 		Protocol: s.protocol.Name,
 		Source:   s.source,
-		Imports:  []string{TransportImport},
 	}
+
+	imports := []string{TransportImport}
+	stdImports := []string{}
+	needsSync := false
 
 	for _, iface := range s.protocol.Interfaces {
 		ifaceData, err := s.processInterface(iface)
@@ -251,6 +256,9 @@ func (s *Scanner) prepareTemplateData(packageName string) (templateData, error) 
 			return data, err
 		}
 		data.Interfaces = append(data.Interfaces, ifaceData)
+		if len(iface.Events) > 0 {
+			needsSync = true
+		}
 
 		for _, enum := range iface.Enums {
 			for _, entry := range enum.Entries {
@@ -267,14 +275,35 @@ func (s *Scanner) prepareTemplateData(packageName string) (templateData, error) 
 		}
 	}
 
+	// Handlers are registered and dispatched from different goroutines, so an
+	// interface with events needs a mutex.
+	if needsSync {
+		stdImports = append(stdImports, "sync")
+	}
+
+	var block strings.Builder
+	block.WriteString("import (\n")
+	for _, imp := range stdImports {
+		fmt.Fprintf(&block, "\t%q\n", imp)
+	}
+	if len(stdImports) > 0 && len(imports) > 0 {
+		block.WriteString("\n")
+	}
+	for _, imp := range imports {
+		fmt.Fprintf(&block, "\t%q\n", imp)
+	}
+	block.WriteString(")")
+	data.ImportBlock = block.String()
+
 	return data, nil
 }
 
 func (s *Scanner) processInterface(iface Interface) (interfaceData, error) {
 	data := interfaceData{
-		Name:    iface.Name,
-		GoName:  s.toGoName(iface.Name),
-		Version: iface.Version,
+		Name:      iface.Name,
+		GoName:    s.toGoName(iface.Name),
+		Version:   iface.Version,
+		HasEvents: len(iface.Events) > 0,
 	}
 
 	for i, req := range iface.Requests {
@@ -401,11 +430,13 @@ func (s *Scanner) processRequest(iface Interface, req Request, opcode int) (requ
 }
 
 func (s *Scanner) processEvent(event Event, opcode int) (eventData, error) {
+	goName := s.toGoName(event.Name)
 	data := eventData{
-		Name:         event.Name,
-		GoName:       s.toGoName(event.Name),
-		Opcode:       opcode,
-		HandlerField: "on" + s.toGoName(event.Name),
+		Name:            event.Name,
+		GoName:          goName,
+		Opcode:          opcode,
+		HandlerField:    "on" + goName,
+		HandlerAccessor: "handlersFor" + goName,
 	}
 
 	var params, args []string

@@ -5,6 +5,8 @@
 package protocoltest
 
 import (
+	"sync"
+
 	"github.com/bnema/wlturbo/wl"
 )
 
@@ -138,6 +140,9 @@ const FixtureThingInterface = "zwlr_fixture_thing_v1"
 // FixtureThing is the generated binding for zwlr_fixture_thing_v1 version 1.
 type FixtureThing struct {
 	wl.BaseProxy
+	// handlersMu guards the handler slices: a client may register or replace
+	// handlers while another goroutine dispatches events.
+	handlersMu     sync.Mutex
 	onReady        []func(serial uint32)
 	onLabelChanged []func(label string)
 	onGeometry     []func(x int32, y int32, width uint32, height uint32)
@@ -169,38 +174,136 @@ func (o *FixtureThing) Destroy() error {
 }
 
 // OnReady registers a handler for the ready event.
+//
+// Handlers are appended, so a second call adds another handler rather than
+// replacing the first. Registration is safe while another goroutine dispatches.
 func (o *FixtureThing) OnReady(handler func(serial uint32)) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
 	o.onReady = append(o.onReady, handler)
 }
 
+// handlersForReady returns the handlers registered for ready, taken
+// under the lock so a handler may register another handler while events are
+// being dispatched.
+func (o *FixtureThing) handlersForReady() []func(serial uint32) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
+	return append([]func(serial uint32){}, o.onReady...)
+}
+
 // OnLabelChanged registers a handler for the label_changed event.
+//
+// Handlers are appended, so a second call adds another handler rather than
+// replacing the first. Registration is safe while another goroutine dispatches.
 func (o *FixtureThing) OnLabelChanged(handler func(label string)) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
 	o.onLabelChanged = append(o.onLabelChanged, handler)
 }
 
+// handlersForLabelChanged returns the handlers registered for label_changed, taken
+// under the lock so a handler may register another handler while events are
+// being dispatched.
+func (o *FixtureThing) handlersForLabelChanged() []func(label string) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
+	return append([]func(label string){}, o.onLabelChanged...)
+}
+
 // OnGeometry registers a handler for the geometry event.
+//
+// Handlers are appended, so a second call adds another handler rather than
+// replacing the first. Registration is safe while another goroutine dispatches.
 func (o *FixtureThing) OnGeometry(handler func(x int32, y int32, width uint32, height uint32)) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
 	o.onGeometry = append(o.onGeometry, handler)
 }
 
+// handlersForGeometry returns the handlers registered for geometry, taken
+// under the lock so a handler may register another handler while events are
+// being dispatched.
+func (o *FixtureThing) handlersForGeometry() []func(x int32, y int32, width uint32, height uint32) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
+	return append([]func(x int32, y int32, width uint32, height uint32){}, o.onGeometry...)
+}
+
 // OnMode registers a handler for the mode event.
+//
+// Handlers are appended, so a second call adds another handler rather than
+// replacing the first. Registration is safe while another goroutine dispatches.
 func (o *FixtureThing) OnMode(handler func(modeObject *FixtureMode)) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
 	o.onMode = append(o.onMode, handler)
 }
 
+// handlersForMode returns the handlers registered for mode, taken
+// under the lock so a handler may register another handler while events are
+// being dispatched.
+func (o *FixtureThing) handlersForMode() []func(modeObject *FixtureMode) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
+	return append([]func(modeObject *FixtureMode){}, o.onMode...)
+}
+
 // OnPeer registers a handler for the peer event.
+//
+// Handlers are appended, so a second call adds another handler rather than
+// replacing the first. Registration is safe while another goroutine dispatches.
 func (o *FixtureThing) OnPeer(handler func(surfaceID uint32)) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
 	o.onPeer = append(o.onPeer, handler)
 }
 
+// handlersForPeer returns the handlers registered for peer, taken
+// under the lock so a handler may register another handler while events are
+// being dispatched.
+func (o *FixtureThing) handlersForPeer() []func(surfaceID uint32) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
+	return append([]func(surfaceID uint32){}, o.onPeer...)
+}
+
 // OnScaled registers a handler for the scaled event.
+//
+// Handlers are appended, so a second call adds another handler rather than
+// replacing the first. Registration is safe while another goroutine dispatches.
 func (o *FixtureThing) OnScaled(handler func(scale wl.Fixed)) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
 	o.onScaled = append(o.onScaled, handler)
 }
 
+// handlersForScaled returns the handlers registered for scaled, taken
+// under the lock so a handler may register another handler while events are
+// being dispatched.
+func (o *FixtureThing) handlersForScaled() []func(scale wl.Fixed) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
+	return append([]func(scale wl.Fixed){}, o.onScaled...)
+}
+
 // OnBlob registers a handler for the blob event.
+//
+// Handlers are appended, so a second call adds another handler rather than
+// replacing the first. Registration is safe while another goroutine dispatches.
 func (o *FixtureThing) OnBlob(handler func(data []byte)) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
 	o.onBlob = append(o.onBlob, handler)
+}
+
+// handlersForBlob returns the handlers registered for blob, taken
+// under the lock so a handler may register another handler while events are
+// being dispatched.
+func (o *FixtureThing) handlersForBlob() []func(data []byte) {
+	o.handlersMu.Lock()
+	defer o.handlersMu.Unlock()
+	return append([]func(data []byte){}, o.onBlob...)
 }
 
 // Dispatch decodes one event on zwlr_fixture_thing_v1 and calls the registered handlers.
@@ -208,12 +311,12 @@ func (o *FixtureThing) Dispatch(event *wl.Event) {
 	switch event.Opcode {
 	case 0: // ready
 		serial := event.Uint32()
-		for _, handler := range o.onReady {
+		for _, handler := range o.handlersForReady() {
 			handler(serial)
 		}
 	case 1: // label_changed
 		label := event.String()
-		for _, handler := range o.onLabelChanged {
+		for _, handler := range o.handlersForLabelChanged() {
 			handler(label)
 		}
 	case 2: // geometry
@@ -221,7 +324,7 @@ func (o *FixtureThing) Dispatch(event *wl.Event) {
 		y := event.Int32()
 		width := event.Uint32()
 		height := event.Uint32()
-		for _, handler := range o.onGeometry {
+		for _, handler := range o.handlersForGeometry() {
 			handler(x, y, width, height)
 		}
 	case 3: // mode
@@ -230,22 +333,22 @@ func (o *FixtureThing) Dispatch(event *wl.Event) {
 		modeObject.SetContext(o.Context())
 		modeObject.SetID(modeID)
 		o.Context().Register(modeObject)
-		for _, handler := range o.onMode {
+		for _, handler := range o.handlersForMode() {
 			handler(modeObject)
 		}
 	case 4: // peer
 		surfaceID := event.Uint32()
-		for _, handler := range o.onPeer {
+		for _, handler := range o.handlersForPeer() {
 			handler(surfaceID)
 		}
 	case 5: // scaled
 		scale := event.Fixed()
-		for _, handler := range o.onScaled {
+		for _, handler := range o.handlersForScaled() {
 			handler(scale)
 		}
 	case 6: // blob
 		data := event.Array()
-		for _, handler := range o.onBlob {
+		for _, handler := range o.handlersForBlob() {
 			handler(data)
 		}
 	default:
