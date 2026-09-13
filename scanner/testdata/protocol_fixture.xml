@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="wlvision_fixture">
+  <copyright>
+    Synthetic protocol used to test the wlvision protocol generator. It exists
+    only in this repository's tests.
+  </copyright>
+
+  <interface name="zwlr_fixture_manager_v1" version="2">
+    <description summary="fixture manager">
+      Exercises new_id requests, object references, fixed point numbers,
+      strings, arrays, file descriptors and destructors.
+    </description>
+
+    <request name="create_thing">
+      <description summary="create a fixture object"/>
+      <arg name="seat" type="object" interface="wl_seat"/>
+      <arg name="id" type="new_id" interface="zwlr_fixture_thing_v1"/>
+    </request>
+
+    <request name="set_ratio">
+      <arg name="ratio" type="fixed"/>
+    </request>
+
+    <request name="set_label">
+      <arg name="label" type="string"/>
+    </request>
+
+    <request name="set_region">
+      <arg name="region" type="object" interface="wl_region"/>
+    </request>
+
+    <request name="set_buffer">
+      <description summary="reference an interface without a typed wrapper"/>
+      <arg name="buffer" type="object" interface="wl_buffer"/>
+    </request>
+
+    <request name="set_optional_output">
+      <arg name="output" type="object" interface="wl_output" allow-null="true"/>
+    </request>
+
+    <request name="attach_raw">
+      <arg name="data" type="array"/>
+    </request>
+
+    <request name="pass_fd">
+      <arg name="fd" type="fd"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager"/>
+    </request>
+  </interface>
+
+  <interface name="zwlr_fixture_thing_v1" version="1">
+    <description summary="fixture object"/>
+
+    <enum name="fixture_state">
+      <entry name="idle" value="0"/>
+      <entry name="busy" value="1"/>
+    </enum>
+
+    <request name="set_scale">
+      <arg name="scale" type="fixed"/>
+    </request>
+
+    <request name="destroy" type="destructor"/>
+
+    <event name="ready">
+      <arg name="serial" type="uint"/>
+    </event>
+
+    <event name="label_changed">
+      <arg name="label" type="string"/>
+    </event>
+
+    <event name="geometry">
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </event>
+
+    <event name="mode">
+      <arg name="mode" type="new_id" interface="zwlr_fixture_mode_v1"/>
+    </event>
+
+    <event name="peer">
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </event>
+
+    <event name="scaled">
+      <arg name="scale" type="fixed"/>
+    </event>
+
+    <event name="blob">
+      <arg name="data" type="array"/>
+    </event>
+  </interface>
+
+  <interface name="zwlr_fixture_mode_v1" version="1">
+    <description summary="fixture mode object"/>
+
+    <request name="destroy" type="destructor"/>
+  </interface>
+</protocol>

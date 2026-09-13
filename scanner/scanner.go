@@ -1,10 +1,11 @@
-// Package scanner provides a Wayland protocol scanner that generates Go bindings from XML protocol files.
+// Package scanner generates WLTurbo-backed Go bindings from Wayland protocol
+// XML files.
 //
-// This scanner parses Wayland protocol XML files and generates idiomatic Go code with:
-// - Type-safe interfaces and implementations
-// - Proper marshalling/unmarshalling of Wayland wire format
-// - Connection handling and message dispatching
-// - Error handling and validation
+// The generated code owns protocol semantics only: it embeds wl.BaseProxy,
+// allocates and registers child objects through the wl.Context, sends requests
+// through that context, and dispatches typed events to registered handlers.
+// Message framing, descriptor passing and connection lifetime stay in the
+// transport, so a generated binding never opens a socket or writes a header.
 package scanner
 
 import (
@@ -14,11 +15,14 @@ import (
 	"go/format"
 	"io"
 	"os"
-	"sort"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"text/template"
 )
+
+// TransportImport is the import path generated bindings use for the Wayland
+// transport.
+const TransportImport = "github.com/bnema/wlturbo/wl"
 
 // Protocol represents a Wayland protocol specification
 type Protocol struct {
@@ -92,22 +96,16 @@ type Description struct {
 // Scanner generates Go bindings from Wayland protocol XML
 type Scanner struct {
 	protocol *Protocol
-	imports  map[string]bool
+	source   string
 }
 
 // NewScanner creates a new protocol scanner
 func NewScanner() *Scanner {
-	return &Scanner{
-		imports: make(map[string]bool),
-	}
+	return &Scanner{}
 }
 
 // ParseXML parses a Wayland protocol XML file
 func (s *Scanner) ParseXML(path string) error {
-	// Basic path validation to prevent path traversal
-	if strings.Contains(path, "..") {
-		return fmt.Errorf("invalid path: path traversal not allowed")
-	}
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("failed to open XML file: %w", err)
@@ -125,6 +123,9 @@ func (s *Scanner) ParseXML(path string) error {
 	}
 
 	s.protocol = &protocol
+	// Only the base name is recorded: generated output must not depend on the
+	// path the XML happened to be read from.
+	s.source = filepath.Base(path)
 	return nil
 }
 
@@ -134,297 +135,392 @@ func (s *Scanner) Generate(packageName string) ([]byte, error) {
 		return nil, fmt.Errorf("no protocol parsed")
 	}
 
-	// Reset imports
-	s.imports = map[string]bool{
-		"fmt":     true,
-		"errors":  true,
-		"time":    true,
-		"sync":    true,
-		"unsafe":  true,
-		"syscall": true,
+	data, err := s.prepareTemplateData(packageName)
+	if err != nil {
+		return nil, err
 	}
 
-	// Generate code
 	var buf bytes.Buffer
-	data := s.prepareTemplateData(packageName)
-
-	tmpl := template.Must(template.New("protocol").Funcs(s.templateFuncs()).Parse(protocolTemplate))
+	tmpl := template.Must(template.New("protocol").Parse(protocolTemplate))
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return nil, fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	// Format the generated code
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
-		// Return unformatted code for debugging
 		return buf.Bytes(), fmt.Errorf("failed to format generated code: %w", err)
 	}
-
 	return formatted, nil
 }
 
 // templateData holds data for template generation
 type templateData struct {
-	Package     string
-	Imports     []string
-	Protocol    string
-	Interfaces  []interfaceData
-	Constants   []constantData
-	WireFormats []wireFormatData
-	RequestOps  []opData
-	EventOps    []opData
+	Package    string
+	Protocol   string
+	Source     string
+	Imports    []string
+	Constants  []constantData
+	Interfaces []interfaceData
 }
 
 type interfaceData struct {
-	Name         string
-	GoName       string
-	Version      int
-	Description  string
-	Requests     []messageData
-	Events       []messageData
-	RequestOps   []opData
-	EventOps     []opData
-	IsManager    bool
-	ManagedType  string
+	Name     string
+	GoName   string
+	Version  int
+	Requests []requestData
+	Events   []eventData
 }
 
-type messageData struct {
-	Name        string
-	GoName      string
-	Opcode      int
-	Description string
-	Args        []argData
-	Since       int
-	IsDestructor bool
+type requestData struct {
+	Name            string
+	GoName          string
+	Doc             string
+	Opcode          int
+	Destructor      bool
+	Params          string
+	Results         string
+	ArgPreparations []string
+	ArgExprs        []string
+	CreatesChild    bool
+	ChildVar        string
+	ChildType       string
+	ErrorReturn     string
+	HasFDs          bool
+	SendCall        string
 }
 
-type argData struct {
-	Name       string
-	GoName     string
-	Type       string
-	GoType     string
-	WireType   string
-	Interface  string
-	AllowNull  bool
-	IsNewID    bool
-	IsEnum     bool
-	EnumType   string
+type eventData struct {
+	Name          string
+	GoName        string
+	Opcode        int
+	HandlerField  string
+	HandlerParams string
+	HandlerArgs   string
+	DecodeLines   []string
 }
 
 type constantData struct {
-	Name    string
-	Value   string
-	Type    string
-	Comment string
+	Name  string
+	Value string
+	Type  string
+	Enum  string
+	Entry string
 }
 
-type opData struct {
-	Interface string
-	Name      string
-	Value     int
+// knownTransportTypes are the wl_ interfaces the transport ships typed
+// wrappers for. Other wl_ interfaces are handled as generic objects.
+var knownTransportTypes = map[string]bool{
+	"Compositor": true,
+	"Output":     true,
+	"Pointer":    true,
+	"Keyboard":   true,
+	"Region":     true,
+	"Seat":       true,
+	"Surface":    true,
+	"Touch":      true,
 }
 
-type wireFormatData struct {
-	Name   string
-	GoType string
-	Size   int
+// goKeywords are avoided as parameter names because generated identifiers
+// must not collide with the language.
+var goKeywords = map[string]bool{
+	"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
+	"func": true, "go": true, "goto": true, "if": true, "import": true,
+	"interface": true, "map": true, "package": true, "range": true, "return": true,
+	"select": true, "struct": true, "switch": true, "type": true, "var": true,
 }
 
-func (s *Scanner) prepareTemplateData(packageName string) templateData {
+func (s *Scanner) prepareTemplateData(packageName string) (templateData, error) {
 	data := templateData{
 		Package:  packageName,
 		Protocol: s.protocol.Name,
+		Source:   s.source,
+		Imports:  []string{TransportImport},
 	}
 
-	// Collect imports
-	for imp := range s.imports {
-		data.Imports = append(data.Imports, imp)
-	}
-	sort.Strings(data.Imports)
-
-	// Process interfaces
 	for _, iface := range s.protocol.Interfaces {
-		ifaceData := s.processInterface(iface)
+		ifaceData, err := s.processInterface(iface)
+		if err != nil {
+			return data, err
+		}
 		data.Interfaces = append(data.Interfaces, ifaceData)
 
-		// Collect opcodes for dispatch tables
-		for _, req := range ifaceData.Requests {
-			data.RequestOps = append(data.RequestOps, opData{
-				Interface: ifaceData.Name,
-				Name:      req.Name,
-				Value:     req.Opcode,
-			})
-		}
-		for _, event := range ifaceData.Events {
-			data.EventOps = append(data.EventOps, opData{
-				Interface: ifaceData.Name,
-				Name:      event.Name,
-				Value:     event.Opcode,
-			})
-		}
-
-		// Process enums as constants
 		for _, enum := range iface.Enums {
 			for _, entry := range enum.Entries {
-				constName := s.toConstantName(iface.Name, enum.Name, entry.Name)
 				data.Constants = append(data.Constants, constantData{
-					Name:    constName,
-					Value:   entry.Value,
-					Type:    "int32",
-					Comment: entry.Summary,
+					Name:  s.toConstantName(iface.Name, enum.Name, entry.Name),
+					Value: entry.Value,
+					Type:  "int32",
+					Enum:  enum.Name,
+					Entry: entry.Name,
 				})
 			}
 		}
 	}
 
-	// Add wire format types
-	data.WireFormats = []wireFormatData{
-		{Name: "Int", GoType: "int32", Size: 4},
-		{Name: "Uint", GoType: "uint32", Size: 4},
-		{Name: "Fixed", GoType: "Fixed", Size: 4},
-		{Name: "String", GoType: "string", Size: -1},
-		{Name: "Object", GoType: "uint32", Size: 4},
-		{Name: "NewID", GoType: "uint32", Size: 4},
-		{Name: "Array", GoType: "[]byte", Size: -1},
-		{Name: "FD", GoType: "int32", Size: 4},
-	}
-
-	return data
+	return data, nil
 }
 
-func (s *Scanner) processInterface(iface Interface) interfaceData {
+func (s *Scanner) processInterface(iface Interface) (interfaceData, error) {
 	data := interfaceData{
-		Name:        iface.Name,
-		GoName:      s.toGoName(iface.Name),
-		Version:     iface.Version,
-		Description: s.formatDescription(iface.Description),
-		IsManager:   strings.Contains(iface.Name, "manager"),
+		Name:    iface.Name,
+		GoName:  s.toGoName(iface.Name),
+		Version: iface.Version,
 	}
 
-	// Determine managed type for managers
-	if data.IsManager {
-		// Extract managed type name (e.g., zwlr_virtual_pointer_manager_v1 -> zwlr_virtual_pointer_v1)
-		parts := strings.Split(iface.Name, "_")
-		for i, part := range parts {
-			if part == "manager" && i > 0 {
-				parts = append(parts[:i], parts[i+1:]...)
-				break
-			}
-		}
-		data.ManagedType = strings.Join(parts, "_")
-	}
-
-	// Process requests
 	for i, req := range iface.Requests {
-		msgData := messageData{
-			Name:         req.Name,
-			GoName:       s.toGoName(req.Name),
-			Opcode:       i,
-			Description:  s.formatDescription(req.Description),
-			Since:        req.Since,
-			IsDestructor: req.Type == "destructor",
+		request, err := s.processRequest(iface, req, i)
+		if err != nil {
+			return data, err
 		}
-
-		for _, arg := range req.Args {
-			msgData.Args = append(msgData.Args, s.processArg(arg))
-		}
-
-		data.Requests = append(data.Requests, msgData)
+		data.Requests = append(data.Requests, request)
 	}
 
-	// Process events
 	for i, event := range iface.Events {
-		msgData := messageData{
-			Name:        event.Name,
-			GoName:      s.toGoName(event.Name),
-			Opcode:      i,
-			Description: s.formatDescription(event.Description),
-			Since:       event.Since,
+		eventData, err := s.processEvent(event, i)
+		if err != nil {
+			return data, err
 		}
-
-		for _, arg := range event.Args {
-			msgData.Args = append(msgData.Args, s.processArg(arg))
-		}
-
-		data.Events = append(data.Events, msgData)
+		data.Events = append(data.Events, eventData)
 	}
 
-	return data
+	return data, nil
 }
 
-func (s *Scanner) processArg(arg Arg) argData {
-	data := argData{
-		Name:      arg.Name,
-		GoName:    s.toGoName(arg.Name),
-		Type:      arg.Type,
-		Interface: arg.Interface,
-		AllowNull: arg.AllowNull,
-		IsNewID:   arg.Type == "new_id",
+func (s *Scanner) processRequest(iface Interface, req Request, opcode int) (requestData, error) {
+	data := requestData{
+		Name:       req.Name,
+		GoName:     s.toGoName(req.Name),
+		Doc:        s.formatDescription(req.Description),
+		Opcode:     opcode,
+		Destructor: req.Type == "destructor",
+		ChildVar:   "child",
 	}
 
-	// Determine Go type and wire type
+	var (
+		params   []string
+		argExprs []string
+		fdExprs  []string
+		newIDArg *Arg
+	)
+
+	for i, arg := range req.Args {
+		if arg.Type == "new_id" {
+			if newIDArg != nil {
+				return data, fmt.Errorf("%s.%s: more than one new_id argument is not supported", iface.Name, req.Name)
+			}
+			newIDArg = &arg
+			continue
+		}
+
+		name := s.paramName(arg.Name, i)
+		goType, err := s.goTypeForArg(arg)
+		if err != nil {
+			return data, fmt.Errorf("%s.%s: %w", iface.Name, req.Name, err)
+		}
+
+		switch arg.Type {
+		case "object":
+			// Objects are pointer types, and travel as wl.Object so a nil
+			// pointer is never sent as a non-nil interface holding a typed nil.
+			params = append(params, name+" *"+goType)
+			holder := fmt.Sprintf("arg%d", i)
+			data.ArgPreparations = append(data.ArgPreparations,
+				fmt.Sprintf("var %s wl.Object", holder),
+				fmt.Sprintf("if %s != nil {", name),
+				fmt.Sprintf("\t%s = %s", holder, name),
+				"}")
+			argExprs = append(argExprs, holder)
+
+		case "fd":
+			// Descriptors travel out of band: the body carries no value for
+			// them, and the descriptor list is attached to the request.
+			params = append(params, name+" int")
+			fdExprs = append(fdExprs, name)
+			argExprs = append(argExprs, "uintptr("+name+")")
+
+		default:
+			params = append(params, name+" "+goType)
+			argExprs = append(argExprs, name)
+		}
+	}
+
+	if newIDArg != nil {
+		childType, err := s.goTypeForArg(*newIDArg)
+		if err != nil {
+			return data, fmt.Errorf("%s.%s: %w", iface.Name, req.Name, err)
+		}
+		data.CreatesChild = true
+		data.ChildType = childType
+		argExprs = append(argExprs, data.ChildVar)
+	}
+
+	data.Params = strings.Join(params, ", ")
+	data.ArgExprs = argExprs
+	args := ""
+	if len(argExprs) > 0 {
+		args = ", " + strings.Join(argExprs, ", ")
+	}
+	if len(fdExprs) > 0 {
+		data.HasFDs = true
+		data.SendCall = fmt.Sprintf("SendRequestWithFDs(o, %d, []int{%s}%s)", opcode, strings.Join(fdExprs, ", "), args)
+	} else {
+		data.SendCall = fmt.Sprintf("SendRequest(o, %d%s)", opcode, args)
+	}
+	if data.CreatesChild {
+		data.Results = "(*" + data.ChildType + ", error)"
+		data.ErrorReturn = "nil, err"
+	} else {
+		data.Results = "error"
+		data.ErrorReturn = "err"
+	}
+
+	return data, nil
+}
+
+func (s *Scanner) processEvent(event Event, opcode int) (eventData, error) {
+	data := eventData{
+		Name:         event.Name,
+		GoName:       s.toGoName(event.Name),
+		Opcode:       opcode,
+		HandlerField: "on" + s.toGoName(event.Name),
+	}
+
+	var params, args []string
+
+	for i, arg := range event.Args {
+		name := s.paramName(arg.Name, i)
+
+		switch arg.Type {
+		case "new_id":
+			childType, err := s.goTypeForArg(arg)
+			if err != nil {
+				return data, fmt.Errorf("%s.%s: %w", event.Name, arg.Name, err)
+			}
+			child := name + "Object"
+			data.DecodeLines = append(data.DecodeLines,
+				fmt.Sprintf("%sID := event.Uint32()", name),
+				fmt.Sprintf("%s := &%s{}", child, childType),
+				fmt.Sprintf("%s.SetContext(o.Context())", child),
+				fmt.Sprintf("%s.SetID(%sID)", child, name),
+				fmt.Sprintf("o.Context().Register(%s)", child),
+			)
+			params = append(params, child+" *"+childType)
+			args = append(args, child)
+
+		case "object":
+			// Object references are reported as raw object IDs: the generated
+			// layer does not own a registry of foreign proxies.
+			data.DecodeLines = append(data.DecodeLines, fmt.Sprintf("%sID := event.Uint32()", name))
+			params = append(params, name+"ID uint32")
+			args = append(args, name+"ID")
+
+		default:
+			goType, decoder, err := s.scalarDecoder(arg)
+			if err != nil {
+				return data, fmt.Errorf("%s.%s: %w", event.Name, arg.Name, err)
+			}
+			data.DecodeLines = append(data.DecodeLines, fmt.Sprintf("%s := event.%s()", name, decoder))
+			params = append(params, name+" "+goType)
+			args = append(args, name)
+		}
+	}
+
+	data.HandlerParams = strings.Join(params, ", ")
+	data.HandlerArgs = strings.Join(args, ", ")
+	return data, nil
+}
+
+// scalarDecoder maps a simple argument to its Go type and event decoder.
+func (s *Scanner) scalarDecoder(arg Arg) (goType, decoder string, err error) {
 	switch arg.Type {
 	case "int":
-		data.GoType = "int32"
-		data.WireType = "Int"
+		return "int32", "Int32", nil
 	case "uint":
-		data.GoType = "uint32"
-		data.WireType = "Uint"
+		return "uint32", "Uint32", nil
 	case "fixed":
-		data.GoType = "Fixed"
-		data.WireType = "Fixed"
-		s.imports["math"] = true
+		return "wl.Fixed", "Fixed", nil
 	case "string":
-		data.GoType = "string"
-		data.WireType = "String"
-	case "object":
-		if arg.Interface != "" {
-			data.GoType = "*" + s.toGoName(arg.Interface)
-		} else {
-			data.GoType = "WaylandObject"
-		}
-		data.WireType = "Object"
-	case "new_id":
-		if arg.Interface != "" {
-			data.GoType = "*" + s.toGoName(arg.Interface)
-		} else {
-			data.GoType = "WaylandObject"
-		}
-		data.WireType = "NewID"
+		return "string", "String", nil
 	case "array":
-		data.GoType = "[]byte"
-		data.WireType = "Array"
+		return "[]byte", "Array", nil
 	case "fd":
-		data.GoType = "int"
-		data.WireType = "FD"
-		s.imports["os"] = true
-	default:
-		data.GoType = "interface{}"
-		data.WireType = "Unknown"
+		return "uintptr", "Fd", nil
 	}
+	return "", "", fmt.Errorf("unsupported event argument type %q", arg.Type)
+}
 
-	// Handle enum types
-	if arg.Enum != "" {
-		data.IsEnum = true
-		data.EnumType = arg.Enum
-		// Keep numeric type for enums
-		if data.GoType == "interface{}" {
-			data.GoType = "uint32"
+// goTypeForArg returns the Go type of an object-like argument. Protocol-local
+// interfaces map to generated types, known core interfaces to transport
+// wrappers, and everything else to the generic object interface.
+func (s *Scanner) goTypeForArg(arg Arg) (string, error) {
+	switch arg.Type {
+	case "int":
+		return "int32", nil
+	case "uint":
+		return "uint32", nil
+	case "fixed":
+		return "wl.Fixed", nil
+	case "string":
+		return "string", nil
+	case "array":
+		return "[]byte", nil
+	case "fd":
+		return "int", nil
+	case "object", "new_id":
+		return s.goTypeForInterface(arg.Interface), nil
+	}
+	return "", fmt.Errorf("unsupported argument type %q", arg.Type)
+}
+
+func (s *Scanner) goTypeForInterface(iface string) string {
+	if iface == "" {
+		return "wl.BaseProxy"
+	}
+	if strings.HasPrefix(iface, "wl_") {
+		goName := s.toGoName(iface)
+		if knownTransportTypes[goName] {
+			return "wl." + goName
 		}
+		return "wl.BaseProxy"
+	}
+	return s.toGoName(iface)
+}
+
+// paramName turns a protocol argument name into a Go parameter name.
+func (s *Scanner) paramName(name string, index int) string {
+	if name == "" {
+		return fmt.Sprintf("arg%d", index)
 	}
 
-	return data
+	parts := strings.Split(name, "_")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if i == 0 {
+			parts[i] = strings.ToLower(part[:1]) + part[1:]
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	result := strings.Join(parts, "")
+	if result == "" {
+		return fmt.Sprintf("arg%d", index)
+	}
+	if goKeywords[result] {
+		return result + "Arg"
+	}
+	return result
 }
 
 func (s *Scanner) toGoName(name string) string {
-	// Remove protocol prefix and version suffix
 	name = strings.TrimPrefix(name, "zwlr_")
 	name = strings.TrimPrefix(name, "zwp_")
 	name = strings.TrimPrefix(name, "wl_")
 	name = strings.TrimSuffix(name, "_v1")
 	name = strings.TrimSuffix(name, "_v2")
 
-	// Convert snake_case to PascalCase
 	parts := strings.Split(name, "_")
 	for i, part := range parts {
 		if part != "" {
@@ -435,62 +531,37 @@ func (s *Scanner) toGoName(name string) string {
 }
 
 func (s *Scanner) toConstantName(iface, enum, entry string) string {
-	// Build constant name
-	parts := []string{}
-	
-	// Add enum name
-	enumParts := strings.Split(enum, "_")
-	for _, part := range enumParts {
-		if part != "" {
-			parts = append(parts, strings.ToUpper(part))
+	join := func(value string) []string {
+		parts := strings.Split(value, "_")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if part != "" {
+				out = append(out, strings.ToUpper(part))
+			}
 		}
+		return out
 	}
-	
-	// Add entry name
-	entryParts := strings.Split(entry, "_")
-	for _, part := range entryParts {
-		if part != "" {
-			parts = append(parts, strings.ToUpper(part))
-		}
-	}
-	
-	return strings.Join(parts, "_")
+	return strings.Join(append(join(enum), join(entry)...), "_")
 }
 
+// formatDescription renders an argument or request description as a single
+// documentation line.
 func (s *Scanner) formatDescription(desc *Description) string {
 	if desc == nil {
 		return ""
 	}
-	
+
 	text := strings.TrimSpace(desc.Text)
 	if text == "" {
 		return desc.Summary
 	}
-	
-	// Format multiline descriptions
+
 	lines := strings.Split(text, "\n")
-	formatted := []string{}
+	formatted := make([]string, 0, len(lines))
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
+		if line = strings.TrimSpace(line); line != "" {
 			formatted = append(formatted, line)
 		}
 	}
-	
 	return strings.Join(formatted, " ")
-}
-
-func (s *Scanner) templateFuncs() template.FuncMap {
-	return template.FuncMap{
-		"lower": strings.ToLower,
-		"title": func(s string) string {
-			if s == "" {
-				return s
-			}
-			return strings.ToUpper(s[:1]) + strings.ToLower(s[1:])
-		},
-		"hasPrefix": strings.HasPrefix,
-		"trimPrefix": strings.TrimPrefix,
-		"quote": strconv.Quote,
-	}
 }

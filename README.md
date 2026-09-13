@@ -494,20 +494,34 @@ WAYLAND_DEBUG=1 go run examples/virtual_pointer/main.go
 
 ### Code Generation
 
-The `tools/generate.go` utility can generate Go bindings from Wayland protocol XML files:
+The `scanner` package and its command generate Go bindings from Wayland protocol
+XML files:
 
 ```bash
-# Generate virtual pointer bindings
-go run tools/generate.go \
-  -protocol=virtual_pointer \
-  -xml=../wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml \
-  -output=virtual_pointer/generated.go
+# Generate bindings for a protocol
+go run ./scanner/cmd/wayland-scanner \
+  -p myprotocol \
+  -o internal/myprotocol/bindings.go \
+  path/to/my-protocol.xml
+```
 
-# Generate virtual keyboard bindings
-go run tools/generate.go \
-  -protocol=virtual_keyboard \
-  -xml=path/to/virtual-keyboard-unstable-v1.xml \
-  -output=virtual_keyboard/generated.go
+Generated bindings embed `wl.BaseProxy`, allocate and register child objects
+through the `wl.Context`, send requests through that context and dispatch typed
+events to registered handlers. Framing, descriptor passing and connection
+lifetime stay in the transport, so a generated binding never opens a socket.
+
+The protocol packages in `internal/protocols` and the public packages are
+hand-written facades. `scanner/testdata/protocol_fixture.xml` is the generator's
+fixture: its output is committed as `internal/protocoltest/bindings.go`, checked
+byte for byte by `go test ./scanner`, and exercised against a fake compositor by
+`go test ./internal/protocoltest`.
+
+```bash
+# Regenerate the committed fixture bindings
+go run ./scanner/cmd/wayland-scanner \
+  -p protocoltest \
+  -o internal/protocoltest/bindings.go \
+  scanner/testdata/protocol_fixture.xml
 ```
 
 ## Architecture
