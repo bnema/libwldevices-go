@@ -16,10 +16,11 @@ type Client struct {
 	context  *wl.Context
 
 	// Protocol globals
-	pointerManager     uint32
-	keyboardManager    uint32
-	constraintsManager uint32
-	outputManager      uint32
+	pointerManager          uint32
+	keyboardManager         uint32
+	constraintsManager      uint32
+	shortcutsInhibitManager uint32
+	outputManager           uint32
 
 	mu      sync.Mutex
 	globals map[uint32]string
@@ -95,6 +96,9 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 	case "zwp_pointer_constraints_v1":
 		c.constraintsManager = event.Name
 
+	case "zwp_keyboard_shortcuts_inhibit_manager_v1":
+		c.shortcutsInhibitManager = event.Name
+
 	case "zwlr_output_manager_v1":
 		// fmt.Printf("[DEBUG] Setting outputManager to %d\n", event.Name)
 		c.outputManager = event.Name
@@ -169,6 +173,20 @@ func (c *Client) GetConstraintsManagerName() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.constraintsManager
+}
+
+// HasKeyboardShortcutsInhibit returns true if the keyboard shortcuts inhibit protocol is available
+func (c *Client) HasKeyboardShortcutsInhibit() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.shortcutsInhibitManager != 0
+}
+
+// GetKeyboardShortcutsInhibitManagerName returns the name ID for the keyboard shortcuts inhibit manager
+func (c *Client) GetKeyboardShortcutsInhibitManagerName() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.shortcutsInhibitManager
 }
 
 // HasOutputManager returns true if output manager protocol is available

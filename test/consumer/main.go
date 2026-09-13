@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/bnema/libwldevices-go/internal/client"
+	"github.com/bnema/libwldevices-go/keyboard_shortcuts_inhibitor"
 	"github.com/bnema/libwldevices-go/virtual_keyboard"
 	"github.com/bnema/libwldevices-go/virtual_pointer"
 	"github.com/bnema/wlturbo/wl"
@@ -113,12 +114,82 @@ func run() int {
 	}
 	cancel()
 
+	// (e) Keyboard shortcuts inhibitor: the compositor must accept the
+	// inhibit_shortcuts request for a real surface and seat, and the connection
+	// must survive the inhibitor's lifetime.
+	if _, ok := registry.FindGlobal("zwp_keyboard_shortcuts_inhibit_manager_v1"); !ok {
+		fmt.Println("SKIP: compositor does not announce zwp_keyboard_shortcuts_inhibit_manager_v1")
+	} else {
+		// inhibit_shortcuts references a surface and a seat, so the manager must
+		// run on the connection that owns them: see
+		// NewKeyboardShortcutsInhibitorManagerWithClient.
+		inhibitorManager, err := keyboard_shortcuts_inhibitor.NewKeyboardShortcutsInhibitorManagerWithClient(c)
+		check("keyboard_shortcuts_inhibitor.NewKeyboardShortcutsInhibitorManagerWithClient()", err == nil, errDetail(err))
+		if err == nil {
+			runInhibitor(c, registry, inhibitorManager)
+			if cerr := inhibitorManager.Close(); cerr != nil {
+				fmt.Printf("WARN: inhibitor manager close: %v\n", cerr)
+			}
+		}
+	}
+
 	if failed > 0 {
 		fmt.Printf("FAIL: %d assertion(s) failed\n", failed)
 		return 1
 	}
 	fmt.Println("PASS: all virtual input assertions succeeded")
 	return 0
+}
+
+// runInhibitor drives the keyboard shortcuts inhibitor end to end: bind
+// wl_compositor, create a surface, inhibit shortcuts on this client's seat, then
+// destroy the inhibitor and confirm the connection is still healthy.
+func runInhibitor(c *client.Client, registry *wl.Registry, manager *keyboard_shortcuts_inhibitor.KeyboardShortcutsInhibitorManager) {
+	wlContext := c.GetContext()
+
+	compositorGlobal, ok := registry.FindGlobal("wl_compositor")
+	if !ok {
+		check("global wl_compositor present for the inhibitor test", false, "")
+		return
+	}
+
+	compositor := wl.NewCompositor(wlContext)
+	compositorID, err := registry.BindID(compositorGlobal.Name, "wl_compositor", compositorGlobal.Version)
+	if err != nil {
+		check("bind wl_compositor", false, errDetail(err))
+		return
+	}
+	compositor.SetID(compositorID)
+	wlContext.Register(compositor)
+
+	surface, err := compositor.CreateSurface()
+	check("wl_compositor.CreateSurface()", err == nil, errDetail(err))
+	if err != nil {
+		return
+	}
+
+	seat := c.GetSeat()
+	if seat == nil {
+		check("client seat available", false, "")
+		return
+	}
+
+	inhibitor, err := manager.InhibitShortcuts(surface, seat)
+	check("keyboard_shortcuts_inhibitor.InhibitShortcuts()", err == nil, errDetail(err))
+	if err != nil {
+		return
+	}
+
+	// A malformed request would be answered with a protocol error here and the
+	// compositor would drop the connection.
+	err = manager.Roundtrip()
+	check("compositor accepted inhibit_shortcuts", err == nil, errDetail(err))
+
+	err = inhibitor.Destroy()
+	check("keyboard shortcuts inhibitor Destroy()", err == nil, errDetail(err))
+
+	err = manager.Roundtrip()
+	check("connection healthy after inhibitor events", err == nil, errDetail(err))
 }
 
 // runPointer creates a virtual pointer and sends a relative motion plus a frame.
