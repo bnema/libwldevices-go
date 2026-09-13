@@ -83,33 +83,62 @@ func run() int {
 			fmt.Sprintf(" (name=%d version=%d)", g.Name, g.Version))
 	}
 
-	// (c) Virtual pointer: library-reported availability plus real events.
+	// (b2) Purpose-built fixture: a mapped xdg_toplevel with a known title and
+	// app id and an shm buffer, which records the input the compositor delivers
+	// to it. Injection only means something if a real client observes it.
+	fx, ferr := startFixture(c)
+	check("fixture xdg_toplevel mapped with a committed shm buffer", ferr == nil, errDetail(ferr))
+
+	// (c) Virtual pointer: library-reported availability plus real events
+	// observed by the fixture.
 	check("client.HasVirtualPointer() reports zwlr_virtual_pointer_manager_v1",
 		c.HasVirtualPointer(), "")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	pointerManager, err := virtual_pointer.NewVirtualPointerManager(ctx)
 	check("virtual_pointer.NewVirtualPointerManager()", err == nil, errDetail(err))
+	var pointer *virtual_pointer.VirtualPointer
 	if err == nil {
-		runPointer(c, pointerManager)
-		if cerr := pointerManager.Close(); cerr != nil {
-			fmt.Printf("WARN: virtual pointer manager close: %v\n", cerr)
-		}
+		pointer, err = pointerManager.CreatePointer()
+		check("virtual_pointer.CreatePointer()", err == nil, errDetail(err))
 	}
-	cancel()
+	if pointer != nil && fx != nil {
+		runPointer(c, pointer, fx)
+	}
 
 	// (d) Virtual keyboard: construction sends the default keymap, then a real
-	// key press/release pair.
+	// key press/release pair that the fixture must observe.
 	check("client.HasVirtualKeyboard() reports zwp_virtual_keyboard_manager_v1",
 		c.HasVirtualKeyboard(), "")
 
-	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
-	keyboardManager, err := virtual_keyboard.NewVirtualKeyboardManager(ctx)
+	kctx, kcancel := context.WithTimeout(context.Background(), 30*time.Second)
+	keyboardManager, err := virtual_keyboard.NewVirtualKeyboardManager(kctx)
 	check("virtual_keyboard.NewVirtualKeyboardManager()", err == nil, errDetail(err))
+	var keyboard *virtual_keyboard.VirtualKeyboard
 	if err == nil {
-		runKeyboard(c, keyboardManager)
+		keyboard, err = keyboardManager.CreateKeyboard()
+		check("virtual_keyboard.CreateKeyboard() (sends default keymap)",
+			err == nil, errDetail(err))
+	}
+	if keyboard != nil && fx != nil {
+		runKeyboard(c, keyboard, pointer, fx)
+	}
+
+	// (d2) The end-to-end assertion: the fixture's own observations prove the
+	// injected pointer and keyboard events reached a client.
+	if fx != nil {
+		assertFixtureInput(c, fx)
+	}
+
+	if keyboardManager != nil {
 		if cerr := keyboardManager.Close(); cerr != nil {
 			fmt.Printf("WARN: virtual keyboard manager close: %v\n", cerr)
+		}
+	}
+	kcancel()
+	if pointerManager != nil {
+		if cerr := pointerManager.Close(); cerr != nil {
+			fmt.Printf("WARN: virtual pointer manager close: %v\n", cerr)
 		}
 	}
 	cancel()
@@ -192,21 +221,11 @@ func runInhibitor(c *client.Client, registry *wl.Registry, manager *keyboard_sho
 	check("connection healthy after inhibitor events", err == nil, errDetail(err))
 }
 
-// runPointer creates a virtual pointer and sends a relative motion plus a frame.
-func runPointer(c *client.Client, manager *virtual_pointer.VirtualPointerManager) {
-	pointer, err := manager.CreatePointer()
-	check("virtual_pointer.CreatePointer()", err == nil, errDetail(err))
-	if err != nil {
-		return
-	}
-	defer func() {
-		if cerr := pointer.Close(); cerr != nil {
-			fmt.Printf("WARN: virtual pointer close: %v\n", cerr)
-		}
-	}()
-
+// runPointer injects a pointer path and asserts the fixture observes it. The
+// request-acceptance assertions are kept unchanged.
+func runPointer(c *client.Client, pointer *virtual_pointer.VirtualPointer, fx *fixture) {
 	now := time.Now()
-	err = pointer.Motion(now, 12, -7)
+	err := pointer.Motion(now, 12, -7)
 	check("virtual pointer relative Motion() send", err == nil, errDetail(err))
 
 	err = pointer.Frame()
@@ -214,29 +233,65 @@ func runPointer(c *client.Client, manager *virtual_pointer.VirtualPointerManager
 
 	err = c.GetDisplay().Roundtrip()
 	check("client connection healthy after pointer events", err == nil, errDetail(err))
+
+	// The virtual pointer device is what grants the seat its pointer capability,
+	// so the fixture can only create wl_pointer once that capability appears.
+	if !fx.waitPointerCapability(c) {
+		check("fixture observed wl_pointer capability", false, errDetail(fx.fixtureErr()))
+		return
+	}
+	check("fixture observed wl_pointer capability", true, "")
+
+	if err := fx.bindPointer(); err != nil {
+		check("fixture wl_seat.get_pointer()", false, errDetail(err))
+		return
+	}
+	check("fixture wl_seat.get_pointer()", true, "")
+
+	// Warp to the centre of the output (motion_absolute coordinates are
+	// normalised), nudge across the window, then click. Frame() batches each
+	// pointer state.
+	if err := pointer.MotionAbsolute(time.Now(), 1, 1, 2, 2); err != nil {
+		check("virtual pointer absolute Motion() to window centre send", false, errDetail(err))
+	} else {
+		check("virtual pointer absolute Motion() to window centre send", true, "")
+	}
+	if err := pointer.Motion(time.Now(), 40, 30); err != nil {
+		check("virtual pointer Motion() across the window send", false, errDetail(err))
+	}
+	if err := pointer.Frame(); err != nil {
+		check("virtual pointer Frame() after motion send", false, errDetail(err))
+	}
+	if err := pointer.Button(time.Now(), virtual_pointer.BTN_LEFT, virtual_pointer.ButtonStatePressed); err != nil {
+		check("virtual pointer button press send", false, errDetail(err))
+	}
+	if err := pointer.Frame(); err != nil {
+		check("virtual pointer Frame() after press send", false, errDetail(err))
+	}
+	if err := pointer.Button(time.Now(), virtual_pointer.BTN_LEFT, virtual_pointer.ButtonStateReleased); err != nil {
+		check("virtual pointer button release send", false, errDetail(err))
+	}
+	if err := pointer.Frame(); err != nil {
+		check("virtual pointer Frame() after release send", false, errDetail(err))
+	}
+
+	ok := fx.pumpUntil(c, "fixture pointer observations", func() bool {
+		o := fx.snapshot()
+		return o.pointerMotion >= 1 && o.pointerButtonP >= 1 && o.pointerButtonR >= 1
+	})
+	o := fx.snapshot()
+	check("fixture observed pointer motion, button press and release", ok,
+		fmt.Sprintf(" (motion=%d button_press=%d button_release=%d axis=%d%s)",
+			o.pointerMotion, o.pointerButtonP, o.pointerButtonR, o.pointerAxis, errDetail(fx.fixtureErr())))
 }
 
 // runKeyboard creates a virtual keyboard (which sends the default keymap) and
-// sends a key press/release pair.
-func runKeyboard(c *client.Client, manager *virtual_keyboard.VirtualKeyboardManager) {
-	// CreateKeyboard() also uploads the default xkb keymap, so a successful
-	// construction proves the keymap send path worked.
-	keyboard, err := manager.CreateKeyboard()
-	check("virtual_keyboard.CreateKeyboard() (sends default keymap)",
-		err == nil, errDetail(err))
-	if err != nil {
-		return
-	}
-	defer func() {
-		if cerr := keyboard.Close(); cerr != nil {
-			fmt.Printf("WARN: virtual keyboard close: %v\n", cerr)
-		}
-	}()
-
+// sends a key press/release pair the fixture must observe.
+func runKeyboard(c *client.Client, keyboard *virtual_keyboard.VirtualKeyboard, pointer *virtual_pointer.VirtualPointer, fx *fixture) {
 	now := time.Now()
 	// Key() refuses to send with "keymap not set" when the keymap upload did not
 	// happen, so a successful send also proves the keymap was set.
-	err = keyboard.Key(now, virtual_keyboard.KEY_A, virtual_keyboard.KeyStatePressed)
+	err := keyboard.Key(now, virtual_keyboard.KEY_A, virtual_keyboard.KeyStatePressed)
 	check("virtual keyboard key press send", err == nil, errDetail(err))
 
 	err = keyboard.Key(now, virtual_keyboard.KEY_A, virtual_keyboard.KeyStateReleased)
@@ -244,4 +299,67 @@ func runKeyboard(c *client.Client, manager *virtual_keyboard.VirtualKeyboardMana
 
 	err = c.GetDisplay().Roundtrip()
 	check("client connection healthy after key events", err == nil, errDetail(err))
+
+	// The virtual keyboard device grants the seat its keyboard capability, so
+	// the fixture creates wl_keyboard only after that capability appears.
+	if !fx.waitKeyboardCapability(c) {
+		check("fixture observed wl_keyboard capability", false, errDetail(fx.fixtureErr()))
+		return
+	}
+	check("fixture observed wl_keyboard capability", true, "")
+
+	if err := fx.bindKeyboard(); err != nil {
+		check("fixture wl_seat.get_keyboard()", false, errDetail(err))
+		return
+	}
+	check("fixture wl_seat.get_keyboard()", true, "")
+
+	// Nudge the pointer so the compositor re-evaluates focus now that a
+	// keyboard exists; a keyboard enter follows the focused surface.
+	if pointer != nil {
+		_ = pointer.Motion(time.Now(), 1, 1)
+		_ = pointer.Frame()
+	}
+	if !fx.pumpUntil(c, "fixture keyboard focus", func() bool { return fx.snapshot().keyboardEnter >= 1 }) {
+		check("fixture observed wl_keyboard enter (focused)", false, errDetail(fx.fixtureErr()))
+		return
+	}
+	check("fixture observed wl_keyboard enter (focused)", true, "")
+
+	// Re-inject now that the fixture holds keyboard focus, then require the
+	// fixture itself to report the events.
+	now = time.Now()
+	err = keyboard.Key(now, virtual_keyboard.KEY_A, virtual_keyboard.KeyStatePressed)
+	check("virtual keyboard focused key press send", err == nil, errDetail(err))
+	err = keyboard.Key(now, virtual_keyboard.KEY_A, virtual_keyboard.KeyStateReleased)
+	check("virtual keyboard focused key release send", err == nil, errDetail(err))
+
+	ok := fx.pumpUntil(c, "fixture keyboard key events", func() bool {
+		o := fx.snapshot()
+		return o.keyboardKeyP >= 1 && o.keyboardKeyR >= 1
+	})
+	o := fx.snapshot()
+	check("fixture observed keyboard key press and release", ok,
+		fmt.Sprintf(" (key_press=%d key_release=%d modifiers=%d%s)",
+			o.keyboardKeyP, o.keyboardKeyR, o.keyboardMods, errDetail(fx.fixtureErr())))
+
+	_ = keyboard.Close()
+}
+
+// assertFixtureInput is the end-to-end gate: it fails, listing expected and
+// observed events, when the injected input never reached the fixture client.
+func assertFixtureInput(c *client.Client, fx *fixture) {
+	// Give the compositor a final chance to flush anything still queued.
+	_ = c.GetDisplay().Roundtrip()
+	o := fx.snapshot()
+	ok := o.pointerMotion >= 1 && o.pointerButtonP >= 1 && o.pointerButtonR >= 1 &&
+		o.keyboardKeyP >= 1 && o.keyboardKeyR >= 1
+	detail := fmt.Sprintf(
+		" (observed pointer enter=%d leave=%d motion=%d button_press=%d button_release=%d axis=%d; keyboard enter=%d leave=%d key_press=%d key_release=%d modifiers=%d)",
+		o.pointerEnter, o.pointerLeave, o.pointerMotion, o.pointerButtonP, o.pointerButtonR, o.pointerAxis,
+		o.keyboardEnter, o.keyboardLeave, o.keyboardKeyP, o.keyboardKeyR, o.keyboardMods)
+	if !ok {
+		detail += "; expected pointer motion>=1, button_press>=1, button_release>=1, key_press>=1, key_release>=1"
+	}
+	check("fixture observed injected pointer and keyboard input", ok, detail)
 }
