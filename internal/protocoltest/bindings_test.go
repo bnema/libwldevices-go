@@ -169,6 +169,29 @@ func TestNewIDRequestSendsSeatAndAllocatesChild(t *testing.T) {
 	}
 }
 
+// A new_id argument keeps its declared position on the wire; appending it last
+// would send a surface ID where the compositor expects the new object.
+func TestNewIDArgumentKeepsDeclaredPosition(t *testing.T) {
+	srv, _, manager, _ := newFixture(t)
+
+	thing, err := manager.CreateLabeledThing("labeled", wl.Fixed(128))
+	if err != nil {
+		t.Fatalf("CreateLabeledThing: %v", err)
+	}
+
+	req := waitForRequest(t, srv, manager.ID(), 9)
+	if got := req.Uint32(0); got != thing.ID() {
+		t.Fatalf("first argument = %d, want the declared new_id %d", got, thing.ID())
+	}
+	label, consumed := req.String(4)
+	if label != "labeled" {
+		t.Errorf("label = %q, want %q", label, "labeled")
+	}
+	if got := int32(req.Uint32(4 + consumed)); got != 128 {
+		t.Errorf("ratio = %d, want 128", got)
+	}
+}
+
 func TestScalarRequestsEncodeProtocolValues(t *testing.T) {
 	srv, _, manager, _ := newFixture(t)
 

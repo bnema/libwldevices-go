@@ -189,6 +189,13 @@ type requestData struct {
 	SendCall        string
 }
 
+// argSlot is one positional argument of a request, in declaration order. A
+// new_id slot is filled in once the child object has been created.
+type argSlot struct {
+	newID bool
+	expr  string
+}
+
 type eventData struct {
 	Name          string
 	GoName        string
@@ -299,6 +306,7 @@ func (s *Scanner) processRequest(iface Interface, req Request, opcode int) (requ
 
 	var (
 		params   []string
+		argSlots []argSlot
 		argExprs []string
 		fdExprs  []string
 		newIDArg *Arg
@@ -310,6 +318,9 @@ func (s *Scanner) processRequest(iface Interface, req Request, opcode int) (requ
 				return data, fmt.Errorf("%s.%s: more than one new_id argument is not supported", iface.Name, req.Name)
 			}
 			newIDArg = &arg
+			// The child object is created later, but it keeps its declared
+			// position: the wire order is the argument order.
+			argSlots = append(argSlots, argSlot{newID: true})
 			continue
 		}
 
@@ -319,6 +330,7 @@ func (s *Scanner) processRequest(iface Interface, req Request, opcode int) (requ
 			return data, fmt.Errorf("%s.%s: %w", iface.Name, req.Name, err)
 		}
 
+		expr := name
 		switch arg.Type {
 		case "object":
 			// Objects are pointer types, and travel as wl.Object so a nil
@@ -330,19 +342,20 @@ func (s *Scanner) processRequest(iface Interface, req Request, opcode int) (requ
 				fmt.Sprintf("if %s != nil {", name),
 				fmt.Sprintf("\t%s = %s", holder, name),
 				"}")
-			argExprs = append(argExprs, holder)
+			expr = holder
 
 		case "fd":
 			// Descriptors travel out of band: the body carries no value for
 			// them, and the descriptor list is attached to the request.
 			params = append(params, name+" int")
 			fdExprs = append(fdExprs, name)
-			argExprs = append(argExprs, "uintptr("+name+")")
+			expr = "uintptr(" + name + ")"
 
 		default:
 			params = append(params, name+" "+goType)
-			argExprs = append(argExprs, name)
 		}
+
+		argSlots = append(argSlots, argSlot{expr: expr})
 	}
 
 	if newIDArg != nil {
@@ -352,7 +365,14 @@ func (s *Scanner) processRequest(iface Interface, req Request, opcode int) (requ
 		}
 		data.CreatesChild = true
 		data.ChildType = childType
-		argExprs = append(argExprs, data.ChildVar)
+	}
+
+	for _, slot := range argSlots {
+		if slot.newID {
+			argExprs = append(argExprs, data.ChildVar)
+			continue
+		}
+		argExprs = append(argExprs, slot.expr)
 	}
 
 	data.Params = strings.Join(params, ", ")

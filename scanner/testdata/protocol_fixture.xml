@@ -49,6 +49,13 @@
     <request name="destroy" type="destructor">
       <description summary="destroy the manager"/>
     </request>
+
+    <request name="create_labeled_thing">
+      <description summary="new_id argument that is not the last one"/>
+      <arg name="id" type="new_id" interface="zwlr_fixture_thing_v1"/>
+      <arg name="label" type="string"/>
+      <arg name="ratio" type="fixed"/>
+    </request>
   </interface>
 
   <interface name="zwlr_fixture_thing_v1" version="1">

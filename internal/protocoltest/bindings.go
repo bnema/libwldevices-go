@@ -112,6 +112,19 @@ func (o *FixtureManager) Destroy() error {
 	return nil
 }
 
+// new_id argument that is not the last one
+func (o *FixtureManager) CreateLabeledThing(label string, ratio wl.Fixed) (*FixtureThing, error) {
+	child := &FixtureThing{}
+	child.SetContext(o.Context())
+	child.SetID(o.Context().AllocateID())
+	o.Context().Register(child)
+	if err := o.Context().SendRequest(o, 9, child, label, ratio); err != nil {
+		o.Context().Unregister(child)
+		return nil, err
+	}
+	return child, nil
+}
+
 // Dispatch decodes one event on zwlr_fixture_manager_v1 and calls the registered handlers.
 func (o *FixtureManager) Dispatch(event *wl.Event) {
 	switch event.Opcode {
