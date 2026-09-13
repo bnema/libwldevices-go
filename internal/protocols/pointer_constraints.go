@@ -128,6 +128,8 @@ type LockedPointerHandler interface {
 // NewLockedPointer creates a new locked pointer
 func NewLockedPointer(ctx *wl.Context) *LockedPointer {
 	locked := &LockedPointer{}
+	locked.SetContext(ctx)
+	locked.SetID(ctx.AllocateID())
 	ctx.Register(locked)
 	return locked
 }
@@ -196,6 +198,8 @@ type ConfinedPointerHandler interface {
 // NewConfinedPointer creates a new confined pointer
 func NewConfinedPointer(ctx *wl.Context) *ConfinedPointer {
 	confined := &ConfinedPointer{}
+	confined.SetContext(ctx)
+	confined.SetID(ctx.AllocateID())
 	ctx.Register(confined)
 	return confined
 }

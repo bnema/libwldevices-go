@@ -321,7 +321,8 @@ func main() {
 	fmt.Println()
 	fmt.Println("Example Usage in Your Application:")
 	fmt.Println("=================================")
-	fmt.Println(`
+	// Printed with an explicit format because the text contains a literal %v.
+	fmt.Printf("%s", `
 // Initialize
 ctx := context.Background()
 manager, err := pointer_constraints.NewPointerConstraintsManager(ctx)

@@ -284,11 +284,11 @@ func (h *OutputHead) Dispatch(event *wl.Event) {
 	case 8: // scale
 		if h.scaleHandler != nil {
 			rawScale := event.Uint32()
-		// Safe conversion: Wayland scale values are typically small positive numbers
-		if rawScale > 0x7FFFFFFF {
-			return // Invalid scale value, skip
-		}
-		scale := wl.Fixed(rawScale)
+			// Safe conversion: Wayland scale values are typically small positive numbers
+			if rawScale > 0x7FFFFFFF {
+				return // Invalid scale value, skip
+			}
+			scale := wl.Fixed(rawScale)
 			h.scaleHandler(scale)
 		}
 	case 9: // finished
@@ -408,6 +408,8 @@ type OutputConfiguration struct {
 func NewOutputConfiguration(ctx *wl.Context) *OutputConfiguration {
 	config := &OutputConfiguration{}
 	config.SetContext(ctx)
+	config.SetID(ctx.AllocateID())
+	ctx.Register(config)
 	return config
 }
 
@@ -499,6 +501,8 @@ type OutputConfigurationHead struct {
 func NewOutputConfigurationHead(ctx *wl.Context) *OutputConfigurationHead {
 	head := &OutputConfigurationHead{}
 	head.SetContext(ctx)
+	head.SetID(ctx.AllocateID())
+	ctx.Register(head)
 	return head
 }
 

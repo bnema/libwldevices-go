@@ -83,39 +83,39 @@ type Transform int32
 
 // Transform constants for output rotation and flipping
 const (
-	TransformNormal         Transform = iota // No transformation
-	Transform90                              // 90 degree clockwise rotation
-	Transform180                             // 180 degree rotation
-	Transform270                             // 270 degree clockwise rotation
-	TransformFlipped                         // Horizontal flip
-	TransformFlipped90                       // Horizontal flip + 90 degree rotation
-	TransformFlipped180                      // Horizontal flip + 180 degree rotation
-	TransformFlipped270                      // Horizontal flip + 270 degree rotation
+	TransformNormal     Transform = iota // No transformation
+	Transform90                          // 90 degree clockwise rotation
+	Transform180                         // 180 degree rotation
+	Transform270                         // 270 degree clockwise rotation
+	TransformFlipped                     // Horizontal flip
+	TransformFlipped90                   // Horizontal flip + 90 degree rotation
+	TransformFlipped180                  // Horizontal flip + 180 degree rotation
+	TransformFlipped270                  // Horizontal flip + 270 degree rotation
 )
 
 // NewOutputManager creates a new output manager
 func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 	// fmt.Println("[DEBUG] Creating output manager...")
-	
+
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	// Create Wayland client with timeout
 	type clientResult struct {
 		client *client.Client
 		err    error
 	}
-	
+
 	clientCh := make(chan clientResult, 1)
 	go func() {
 		c, err := client.NewClient()
 		clientCh <- clientResult{client: c, err: err}
 	}()
-	
+
 	// Wait for client creation or context cancellation
 	var c *client.Client
 	select {
@@ -166,6 +166,15 @@ func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 	om.manager.SetFinishedHandler(om.handleFinished)
 	// fmt.Println("[DEBUG] Event handlers set up")
 
+	// Fetch the initial output configuration before starting the background
+	// dispatcher. Two goroutines must never read the connection concurrently:
+	// a blocking read in the dispatcher holds the receive lock and can deadlock
+	// this roundtrip.
+	if err := c.GetDisplay().Roundtrip(); err != nil {
+		_ = om.Close()
+		return nil, fmt.Errorf("failed to get initial output configuration: %w", err)
+	}
+
 	// Start event processing in background
 	go func() {
 		// fmt.Println("[DEBUG] Starting event dispatch loop...")
@@ -177,10 +186,6 @@ func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 			}
 		}
 	}()
-
-	// Force a roundtrip to get initial events
-	// fmt.Println("[DEBUG] Performing roundtrip...")
-	_ = c.GetDisplay().Roundtrip() // Ignore roundtrip errors during initialization
 
 	// Wait for initial configuration to be received with context support
 	// fmt.Println("[DEBUG] Waiting for initial configuration...")
@@ -381,6 +386,11 @@ func (om *OutputManager) handleHead(head *protocols.OutputHead) {
 
 		mode.SetPreferredHandler(func() {
 			om.Preferred = true
+			// The preferred event always follows the mode event, so the default
+			// mode is selected here rather than when the mode is created.
+			if outputHead.Mode == nil {
+				outputHead.Mode = om
+			}
 		})
 
 		outputHead.modes = append(outputHead.modes, om)
@@ -427,9 +437,13 @@ func (om *OutputManager) handleHead(head *protocols.OutputHead) {
 
 	head.SetFinishedHandler(func() {
 		// Head is being removed
+		om.mu.Lock()
 		delete(om.heads, outputHead.ID)
-		if om.handlers.OnHeadRemoved != nil {
-			om.handlers.OnHeadRemoved(outputHead)
+		handler := om.handlers.OnHeadRemoved
+		om.mu.Unlock()
+
+		if handler != nil {
+			handler(outputHead)
 		}
 	})
 

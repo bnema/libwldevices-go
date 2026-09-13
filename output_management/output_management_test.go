@@ -1,11 +1,20 @@
 package output_management
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/bnema/libwldevices-go/internal/client"
+	"github.com/bnema/libwldevices-go/internal/protocols"
+	"github.com/bnema/libwldevices-go/internal/testcompositor"
+	"github.com/bnema/wlturbo"
+	"github.com/bnema/wlturbo/wl"
 )
 
 // Unit tests that don't require a compositor
@@ -388,7 +397,7 @@ func TestOutputManagerThreadSafety(t *testing.T) {
 				// Simulate adding/updating heads
 				manager.mu.Lock()
 				headID := uint32(100 + id)
-			manager.heads[headID] = &OutputHead{
+				manager.heads[headID] = &OutputHead{
 					ID:   headID,
 					Name: fmt.Sprintf("Dynamic-%d", id),
 				}
@@ -659,5 +668,469 @@ func TestMemoryAllocation(t *testing.T) {
 
 	if leaked > maxAllowed {
 		t.Errorf("Possible memory leak detected: %d bytes leaked (max allowed: %d)", leaked, maxAllowed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Wire-level tests driving the in-process test compositor. These replace any
+// dependency on a live Wayland session.
+// ---------------------------------------------------------------------------
+
+const (
+	outputGlobalName = 1
+
+	// Object IDs chosen by the test compositor for the objects it creates.
+	// They are deliberately far above the client's own allocation range.
+	testHeadObjectID = 0x7F000001
+	testModeObjectID = 0x7F000002
+
+	testSerial = 42
+)
+
+// newOutputCompositor starts a compositor announcing zwlr_output_manager_v1 and
+// points the client library at it.
+func newOutputCompositor(t *testing.T) *testcompositor.Server {
+	t.Helper()
+
+	srv := testcompositor.Start(t, testcompositor.Global{
+		Name:      outputGlobalName,
+		Interface: protocols.OutputManagerInterface,
+		Version:   4,
+	})
+	srv.Env(t)
+	return srv
+}
+
+// waitForRequests waits until at least n requests on one object and opcode were
+// recorded, then returns them in wire order.
+func waitForRequests(t *testing.T, srv *testcompositor.Server, object uint32, opcode uint16, n int) []testcompositor.Request {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var matched []testcompositor.Request
+		for _, req := range srv.Requests() {
+			if req.Object == object && req.Opcode == opcode {
+				matched = append(matched, req)
+			}
+		}
+		if len(matched) >= n {
+			return matched
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("waited for %d requests object=%d opcode=%d, saw %d: %+v", n, object, opcode, len(matched), matched)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// waitForRequest waits for a request on one object and opcode.
+func waitForRequest(t *testing.T, srv *testcompositor.Server, object uint32, opcode uint16) testcompositor.Request {
+	t.Helper()
+
+	return waitForRequests(t, srv, object, opcode, 1)[0]
+}
+
+// waitForBind waits for a wl_registry.bind request for the given interface.
+func waitForBind(t *testing.T, srv *testcompositor.Server, iface string) testcompositor.Request {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		for _, req := range srv.Requests() {
+			if req.Object != srv.RegistryID() || req.Opcode != 0 {
+				continue
+			}
+			name, _ := req.String(4)
+			if name == iface {
+				return req
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no bind request for %q; recorded: %+v", iface, srv.Requests())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// pushHeadAndDone waits for the client to bind the output manager global and
+// then pushes one complete head + mode + done sequence describing a single
+// 1920x1200@59.997Hz virtual output.
+func pushHeadAndDone(srv *testcompositor.Server) error {
+	deadline := time.Now().Add(2 * time.Second)
+	var managerID uint32
+	for managerID == 0 {
+		managerID = srv.ObjectID(protocols.OutputManagerInterface)
+		if managerID == 0 {
+			if time.Now().After(deadline) {
+				return errors.New("zwlr_output_manager_v1 was never bound")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	events := []struct {
+		object uint32
+		opcode uint16
+		args   []any
+	}{
+		{managerID, 0, []any{uint32(testHeadObjectID)}},        // head
+		{testHeadObjectID, 0, []any{"DP-1"}},                   // name
+		{testHeadObjectID, 1, []any{"Dell U2415 (DP-1)"}},      // description
+		{testHeadObjectID, 2, []any{int32(518), int32(324)}},   // physical_size
+		{testHeadObjectID, 3, []any{uint32(testModeObjectID)}}, // mode
+		{testModeObjectID, 0, []any{int32(1920), int32(1200)}}, // mode size
+		{testModeObjectID, 1, []any{int32(59997)}},             // mode refresh
+		{testModeObjectID, 2, []any{}},                         // mode preferred
+		{testHeadObjectID, 4, []any{int32(1)}},                 // enabled
+		{testHeadObjectID, 6, []any{int32(100), int32(50)}},    // position
+		{testHeadObjectID, 7, []any{int32(TransformNormal)}},   // transform
+		{testHeadObjectID, 8, []any{uint32(256)}},              // scale 1.0
+		{testHeadObjectID, 10, []any{"Dell"}},                  // make
+		{testHeadObjectID, 11, []any{"U2415"}},                 // model
+		{testHeadObjectID, 12, []any{"ABC123"}},                // serial_number
+		{managerID, 1, []any{uint32(testSerial)}},              // done
+	}
+
+	for _, event := range events {
+		if err := srv.SendEvent(event.object, event.opcode, event.args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// newConfiguredOutputManager creates an output manager whose initial
+// configuration is delivered by the test compositor.
+func newConfiguredOutputManager(t *testing.T, srv *testcompositor.Server) *OutputManager {
+	t.Helper()
+
+	sent := make(chan error, 1)
+	go func() { sent <- pushHeadAndDone(srv) }()
+
+	manager, err := NewOutputManager(context.Background())
+	if err != nil {
+		t.Fatalf("NewOutputManager: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	if err := <-sent; err != nil {
+		t.Fatalf("push initial configuration: %v", err)
+	}
+	return manager
+}
+
+func TestManagerBindsOutputManagerGlobal(t *testing.T) {
+	srv := newOutputCompositor(t)
+	manager := newConfiguredOutputManager(t, srv)
+
+	bind := waitForBind(t, srv, protocols.OutputManagerInterface)
+	if got := bind.Uint32(0); got != outputGlobalName {
+		t.Errorf("bind name = %d, want %d", got, outputGlobalName)
+	}
+	iface, consumed := bind.String(4)
+	if iface != protocols.OutputManagerInterface {
+		t.Errorf("bind interface = %q, want %q", iface, protocols.OutputManagerInterface)
+	}
+	if got := bind.Uint32(4 + consumed); got != 4 {
+		t.Errorf("bind version = %d, want 4", got)
+	}
+	bindID := bind.Uint32(8 + consumed)
+	if bindID == 0 {
+		t.Fatal("bind used object ID 0")
+	}
+	if got := srv.ObjectID(protocols.OutputManagerInterface); got != bindID {
+		t.Errorf("bound object ID = %d, want %d", got, bindID)
+	}
+
+	// Closing stops event delivery: zwlr_output_manager_v1.stop is opcode 1.
+	if err := manager.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	stop := waitForRequest(t, srv, bindID, 1)
+	if len(stop.Body) != 0 {
+		t.Errorf("stop carried %d bytes of arguments, want none", len(stop.Body))
+	}
+}
+
+func TestManagerFailsWithoutOutputManagerGlobal(t *testing.T) {
+	srv := testcompositor.Start(t)
+	srv.Env(t)
+
+	manager, err := NewOutputManager(context.Background())
+	if err == nil {
+		_ = manager.Close()
+		t.Fatal("NewOutputManager succeeded without zwlr_output_manager_v1")
+	}
+	if got := err.Error(); got != "zwlr_output_manager_v1 not available - compositor may not support wlr-output-management protocol" {
+		t.Fatalf("error = %q, want the missing-global message", got)
+	}
+}
+
+func TestManagerFailsOnCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	manager, err := NewOutputManager(ctx)
+	if err == nil {
+		_ = manager.Close()
+		t.Fatal("NewOutputManager succeeded with a cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestInitialConfigurationIsParsedFromEvents(t *testing.T) {
+	srv := newOutputCompositor(t)
+	manager := newConfiguredOutputManager(t, srv)
+	managerID := srv.ObjectID(protocols.OutputManagerInterface)
+
+	heads := manager.GetHeads()
+	if len(heads) != 1 {
+		t.Fatalf("GetHeads() = %d heads, want 1", len(heads))
+	}
+	head := heads[0]
+
+	if head.ID != testHeadObjectID {
+		t.Errorf("head.ID = %d, want %d", head.ID, testHeadObjectID)
+	}
+	if head.Name != "DP-1" {
+		t.Errorf("head.Name = %q, want %q", head.Name, "DP-1")
+	}
+	if head.Description != "Dell U2415 (DP-1)" {
+		t.Errorf("head.Description = %q, want the description event value", head.Description)
+	}
+	if head.PhysicalSize != (Size{Width: 518, Height: 324}) {
+		t.Errorf("head.PhysicalSize = %+v, want 518x324", head.PhysicalSize)
+	}
+	if head.Position != (Position{X: 100, Y: 50}) {
+		t.Errorf("head.Position = %+v, want (100,50)", head.Position)
+	}
+	if !head.Enabled {
+		t.Error("head.Enabled = false, want true")
+	}
+	if head.Transform != TransformNormal {
+		t.Errorf("head.Transform = %v, want %v", head.Transform, TransformNormal)
+	}
+	if head.Scale != 1.0 {
+		t.Errorf("head.Scale = %v, want 1.0", head.Scale)
+	}
+	if head.Make != "Dell" || head.Model != "U2415" || head.SerialNumber != "ABC123" {
+		t.Errorf("head make/model/serial = %q/%q/%q, want Dell/U2415/ABC123", head.Make, head.Model, head.SerialNumber)
+	}
+
+	modes := head.GetModes()
+	if len(modes) != 1 {
+		t.Fatalf("head.GetModes() = %d modes, want 1", len(modes))
+	}
+	mode := modes[0]
+	if mode.Width != 1920 || mode.Height != 1200 || mode.Refresh != 59997 || !mode.Preferred {
+		t.Errorf("mode = %dx%d@%d preferred=%v, want 1920x1200@59997 preferred", mode.Width, mode.Height, mode.Refresh, mode.Preferred)
+	}
+	if head.Mode != mode {
+		t.Errorf("head.Mode = %p, want the preferred mode %p", head.Mode, mode)
+	}
+
+	if !manager.hasSerial || manager.serial != testSerial {
+		t.Errorf("manager serial = %d (set=%v), want %d", manager.serial, manager.hasSerial, testSerial)
+	}
+
+	// A later done event must notify OnConfigurationChanged with the known heads.
+	changed := make(chan []*OutputHead, 1)
+	manager.SetHandlers(OutputHandlers{
+		OnConfigurationChanged: func(heads []*OutputHead) { changed <- heads },
+	})
+	if err := srv.SendEvent(managerID, 1, uint32(testSerial+1)); err != nil {
+		t.Fatalf("SendEvent(done): %v", err)
+	}
+	select {
+	case heads := <-changed:
+		if len(heads) != 1 || heads[0].Name != "DP-1" {
+			t.Fatalf("OnConfigurationChanged heads = %+v, want the DP-1 head", heads)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnConfigurationChanged was not called for the done event")
+	}
+}
+
+func TestHeadFinishedRemovesHead(t *testing.T) {
+	srv := newOutputCompositor(t)
+	manager := newConfiguredOutputManager(t, srv)
+
+	removed := make(chan *OutputHead, 1)
+	manager.SetHandlers(OutputHandlers{
+		OnHeadRemoved: func(head *OutputHead) { removed <- head },
+	})
+
+	if err := srv.SendEvent(testHeadObjectID, 9); err != nil {
+		t.Fatalf("SendEvent(finished): %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(manager.GetHeads()) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("head still present after the finished event: %+v", manager.GetHeads())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	select {
+	case head := <-removed:
+		if head.Name != "DP-1" {
+			t.Errorf("OnHeadRemoved head.Name = %q, want %q", head.Name, "DP-1")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnHeadRemoved was not called for the finished event")
+	}
+}
+
+func TestConfigurationRequestsUseProtocolOpcodes(t *testing.T) {
+	srv := newOutputCompositor(t)
+	manager := newConfiguredOutputManager(t, srv)
+	managerID := srv.ObjectID(protocols.OutputManagerInterface)
+	head := manager.GetHeads()[0]
+
+	config, err := manager.manager.CreateConfiguration(manager.serial)
+	if err != nil {
+		t.Fatalf("CreateConfiguration: %v", err)
+	}
+	create := waitForRequest(t, srv, managerID, 0)
+	configID := create.Uint32(0)
+	if configID == 0 {
+		t.Fatal("create_configuration new_id = 0, want a fresh object ID")
+	}
+	if got := create.Uint32(4); got != testSerial {
+		t.Errorf("create_configuration serial = %d, want %d", got, testSerial)
+	}
+
+	configHead, err := config.EnableHead(head.head)
+	if err != nil {
+		t.Fatalf("EnableHead: %v", err)
+	}
+	enable := waitForRequest(t, srv, configID, 0)
+	configHeadID := enable.Uint32(0)
+	if configHeadID == 0 {
+		t.Fatal("enable_head new_id = 0, want a fresh object ID")
+	}
+	if got := enable.Uint32(4); got != testHeadObjectID {
+		t.Errorf("enable_head head = %d, want %d", got, testHeadObjectID)
+	}
+
+	if err := configHead.SetMode(head.modes[0].mode); err != nil {
+		t.Fatalf("SetMode: %v", err)
+	}
+	setMode := waitForRequest(t, srv, configHeadID, 0)
+	if got := setMode.Uint32(0); got != testModeObjectID {
+		t.Errorf("set_mode mode = %d, want %d", got, testModeObjectID)
+	}
+
+	if err := configHead.SetCustomMode(1280, 720, 60000); err != nil {
+		t.Fatalf("SetCustomMode: %v", err)
+	}
+	custom := waitForRequest(t, srv, configHeadID, 1)
+	if custom.Uint32(0) != 1280 || custom.Uint32(4) != 720 || custom.Uint32(8) != 60000 {
+		t.Errorf("set_custom_mode = %d,%d,%d, want 1280,720,60000", custom.Uint32(0), custom.Uint32(4), custom.Uint32(8))
+	}
+
+	if err := configHead.SetPosition(1920, 0); err != nil {
+		t.Fatalf("SetPosition: %v", err)
+	}
+	position := waitForRequest(t, srv, configHeadID, 2)
+	if position.Uint32(0) != 1920 || position.Uint32(4) != 0 {
+		t.Errorf("set_position = %d,%d, want 1920,0", position.Uint32(0), position.Uint32(4))
+	}
+
+	if err := configHead.SetTransform(int32(Transform90)); err != nil {
+		t.Fatalf("SetTransform: %v", err)
+	}
+	transform := waitForRequest(t, srv, configHeadID, 3)
+	if got := transform.Uint32(0); got != uint32(Transform90) {
+		t.Errorf("set_transform = %d, want %d", got, Transform90)
+	}
+
+	if err := configHead.SetScale(wl.Fixed(256)); err != nil {
+		t.Fatalf("SetScale: %v", err)
+	}
+	scale := waitForRequest(t, srv, configHeadID, 4)
+	if got := scale.Uint32(0); got != 256 {
+		t.Errorf("set_scale = %d, want 256 (1.0 in 24.8 fixed point)", got)
+	}
+
+	if err := configHead.SetAdaptiveSync(1); err != nil {
+		t.Fatalf("SetAdaptiveSync: %v", err)
+	}
+	adaptive := waitForRequest(t, srv, configHeadID, 5)
+	if got := adaptive.Uint32(0); got != 1 {
+		t.Errorf("set_adaptive_sync = %d, want 1", got)
+	}
+
+	if err := config.DisableHead(head.head); err != nil {
+		t.Fatalf("DisableHead: %v", err)
+	}
+	disable := waitForRequest(t, srv, configID, 1)
+	if got := disable.Uint32(0); got != testHeadObjectID {
+		t.Errorf("disable_head head = %d, want %d", got, testHeadObjectID)
+	}
+
+	if err := config.Test(); err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+	if test := waitForRequest(t, srv, configID, 3); len(test.Body) != 0 {
+		t.Errorf("test carried %d bytes of arguments, want none", len(test.Body))
+	}
+
+	if err := config.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if apply := waitForRequest(t, srv, configID, 2); len(apply.Body) != 0 {
+		t.Errorf("apply carried %d bytes of arguments, want none", len(apply.Body))
+	}
+
+	if err := config.Destroy(); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if destroy := waitForRequest(t, srv, configID, 4); len(destroy.Body) != 0 {
+		t.Errorf("destroy carried %d bytes of arguments, want none", len(destroy.Body))
+	}
+}
+
+// A compositor error must surface through the connection instead of being
+// swallowed. The OutputManager's own dispatcher intentionally stops on the
+// first connection error, so this test drives the manager's display directly
+// to prove the error reaches the caller of Roundtrip.
+func TestDisplayErrorSurfacesThroughManagerConnection(t *testing.T) {
+	srv := newOutputCompositor(t)
+
+	c, err := client.NewClient()
+	if err != nil {
+		t.Fatalf("client.NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	manager := protocols.NewOutputManager(c.GetContext())
+	if err := c.GetRegistry().Bind(c.GetOutputManagerName(), protocols.OutputManagerInterface, 4, manager); err != nil {
+		t.Fatalf("bind output manager: %v", err)
+	}
+
+	managerID := manager.ID()
+	if managerID == 0 {
+		t.Fatal("output manager was not bound")
+	}
+	if err := srv.SendDisplayError(managerID, 1, "denied"); err != nil {
+		t.Fatalf("SendDisplayError: %v", err)
+	}
+
+	err = c.GetDisplay().Roundtrip()
+	if err == nil {
+		t.Fatal("Roundtrip succeeded, want the compositor error")
+	}
+
+	var displayErr *wlturbo.DisplayError
+	if !errors.As(err, &displayErr) {
+		t.Fatalf("error = %v (%T), want *wlturbo.DisplayError", err, err)
+	}
+	if displayErr.ObjectID != managerID || displayErr.Code != 1 || displayErr.Message != "denied" {
+		t.Fatalf("DisplayError = %+v, want object=%d code=1 message=denied", displayErr, managerID)
 	}
 }
