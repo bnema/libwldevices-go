@@ -7,10 +7,10 @@
 //
 //	// Create constraint manager
 //	manager := NewPointerConstraintsManager(display, registry)
-//	
+//
 //	// Lock pointer to current position (exclusive capture)
 //	lockedPointer := manager.LockPointer(surface, pointer, region, lifetime)
-//	
+//
 //	// Or confine pointer to a region
 //	confinedPointer := manager.ConfinePointer(surface, pointer, region, lifetime)
 //
@@ -33,7 +33,7 @@ import (
 const (
 	LIFETIME_ONESHOT    = 1 // Constraint destroyed on pointer unlock/unconfine
 	LIFETIME_PERSISTENT = 2 // Constraint persists across pointer unlock/unconfine
-	
+
 	// Alternative names used in examples
 	LifetimeOneshot    = LIFETIME_ONESHOT
 	LifetimePersistent = LIFETIME_PERSISTENT
@@ -80,19 +80,19 @@ func NewPointerConstraintsManager(ctx context.Context) (*PointerConstraintsManag
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	// Create Wayland client with timeout
 	type clientResult struct {
 		client *client.Client
 		err    error
 	}
-	
+
 	clientCh := make(chan clientResult, 1)
 	go func() {
 		c, err := client.NewClient()
 		clientCh <- clientResult{client: c, err: err}
 	}()
-	
+
 	// Wait for client creation or context cancellation
 	var c *client.Client
 	select {
@@ -122,7 +122,7 @@ func NewPointerConstraintsManager(ctx context.Context) (*PointerConstraintsManag
 		return nil, fmt.Errorf("context cancelled before binding: %w", ctx.Err())
 	default:
 	}
-	
+
 	// Use the constraints manager name from the client
 	managerName := c.GetConstraintsManagerName()
 	registry := c.GetRegistry()

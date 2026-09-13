@@ -10,11 +10,11 @@ import (
 
 // Client manages the Wayland connection and protocol objects
 type Client struct {
-	display    *wl.Display
-	registry   *wl.Registry
-	seat       *wl.Seat
-	context    *wl.Context
-	
+	display  *wl.Display
+	registry *wl.Registry
+	seat     *wl.Seat
+	context  *wl.Context
+
 	// Protocol globals
 	pointerManager     uint32
 	keyboardManager    uint32
@@ -33,28 +33,28 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to connect to Wayland: %w", err)
 	}
 	// fmt.Println("[DEBUG] Connected to Wayland display successfully")
-	
+
 	client := &Client{
 		display: display,
 		context: display.Context(),
 		globals: make(map[uint32]string),
 	}
-	
+
 	// Get registry
 	registry := display.GetRegistry()
 	client.registry = registry
-	
+
 	// Set up registry listener BEFORE doing any roundtrips
 	registry.AddGlobalHandler(client)
 	registry.AddGlobalRemoveHandler(client)
-	
+
 	// Now do a roundtrip to get all globals announced
 	// fmt.Println("[DEBUG] Performing roundtrip to get globals...")
 	if err := display.Roundtrip(); err != nil {
 		return nil, fmt.Errorf("failed to get initial globals: %w", err)
 	}
 	// fmt.Println("[DEBUG] Roundtrip completed, globals should be announced")
-	
+
 	// Debug: print all globals we received
 	// client.mu.Lock()
 	// fmt.Printf("[DEBUG] Received %d globals:\n", len(client.globals))
@@ -62,19 +62,19 @@ func NewClient() (*Client, error) {
 	// 	fmt.Printf("[DEBUG]   - %s (name=%d)\n", iface, name)
 	// }
 	// client.mu.Unlock()
-	
+
 	return client, nil
 }
 
 // HandleRegistryGlobal implements wl.RegistryGlobalHandler
 func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 	// fmt.Printf("[DEBUG] Global announced: %s v%d (name=%d)\n", event.Interface, event.Version, event.Name)
-	
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	c.globals[event.Name] = event.Interface
-	
+
 	switch event.Interface {
 	case "wl_seat":
 		// Bind to seat for virtual input
@@ -85,16 +85,16 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 			c.context.Register(seat)
 			c.seat = seat
 		}
-		
+
 	case "zwlr_virtual_pointer_manager_v1":
 		c.pointerManager = event.Name
-		
+
 	case "zwp_virtual_keyboard_manager_v1":
 		c.keyboardManager = event.Name
 
 	case "zwp_pointer_constraints_v1":
 		c.constraintsManager = event.Name
-		
+
 	case "zwlr_output_manager_v1":
 		// fmt.Printf("[DEBUG] Setting outputManager to %d\n", event.Name)
 		c.outputManager = event.Name
@@ -105,7 +105,7 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 func (c *Client) HandleRegistryGlobalRemove(event wl.RegistryGlobalRemoveEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	delete(c.globals, event.Name)
 }
 
@@ -150,7 +150,7 @@ func (c *Client) GetPointerManagerName() uint32 {
 	return c.pointerManager
 }
 
-// GetKeyboardManagerName returns the name ID for the virtual keyboard manager  
+// GetKeyboardManagerName returns the name ID for the virtual keyboard manager
 func (c *Client) GetKeyboardManagerName() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()

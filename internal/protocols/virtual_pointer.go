@@ -28,22 +28,22 @@ func NewVirtualPointerManager(ctx *wl.Context) *VirtualPointerManager {
 func (m *VirtualPointerManager) CreateVirtualPointer(seat *wl.Seat) (*VirtualPointer, error) {
 	// Allocate ID for the new pointer object
 	pointerID := m.Context().AllocateID()
-	
+
 	pointer := &VirtualPointer{}
 	pointer.SetContext(m.Context())
 	pointer.SetID(pointerID)
 	m.Context().Register(pointer)
-	
+
 	// Opcode 0: create_virtual_pointer
 	const opcode = 0
-	
+
 	// The neurlang/wayland library expects the object itself for new_id parameters
 	err := m.Context().SendRequest(m, opcode, seat, pointer)
 	if err != nil {
 		m.Context().Unregister(pointer)
 		return nil, err
 	}
-	
+
 	return pointer, nil
 }
 
@@ -51,21 +51,21 @@ func (m *VirtualPointerManager) CreateVirtualPointer(seat *wl.Seat) (*VirtualPoi
 func (m *VirtualPointerManager) CreateVirtualPointerWithOutput(seat *wl.Seat, output *wl.Output) (*VirtualPointer, error) {
 	// Allocate ID for the new pointer object
 	pointerID := m.Context().AllocateID()
-	
+
 	pointer := &VirtualPointer{}
 	pointer.SetContext(m.Context())
 	pointer.SetID(pointerID)
 	m.Context().Register(pointer)
-	
+
 	// Opcode 2: create_virtual_pointer_with_output (since version 2)
 	const opcode = 2
-	
+
 	err := m.Context().SendRequest(m, opcode, seat, output, pointer)
 	if err != nil {
 		m.Context().Unregister(pointer)
 		return nil, err
 	}
-	
+
 	return pointer, nil
 }
 
@@ -73,7 +73,7 @@ func (m *VirtualPointerManager) CreateVirtualPointerWithOutput(seat *wl.Seat, ou
 func (m *VirtualPointerManager) Destroy() error {
 	// Opcode 1: destroy
 	const opcode = 1
-	
+
 	err := m.Context().SendRequest(m, opcode)
 	m.Context().Unregister(m)
 	return err

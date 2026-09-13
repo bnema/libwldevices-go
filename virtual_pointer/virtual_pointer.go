@@ -1,7 +1,7 @@
 // Package virtual_pointer provides Go bindings for the wlr-virtual-pointer-unstable-v1 Wayland protocol.
 //
 // This protocol allows clients to emulate a physical pointer device, enabling mouse input injection
-// into Wayland compositors without requiring root privileges. This is a complete, working 
+// into Wayland compositors without requiring root privileges. This is a complete, working
 // implementation built on neurlang/wayland.
 //
 // # Basic Usage
@@ -134,19 +134,19 @@ func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, erro
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	// Create Wayland client with timeout
 	type clientResult struct {
 		client *client.Client
 		err    error
 	}
-	
+
 	clientCh := make(chan clientResult, 1)
 	go func() {
 		c, err := client.NewClient()
 		clientCh <- clientResult{client: c, err: err}
 	}()
-	
+
 	// Wait for client creation or context cancellation
 	var c *client.Client
 	select {
@@ -158,16 +158,16 @@ func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, erro
 	case <-ctx.Done():
 		return nil, fmt.Errorf("context cancelled during client creation: %w", ctx.Err())
 	}
-	
+
 	// Check if virtual pointer protocol is available
 	if !c.HasVirtualPointer() {
 		_ = c.Close()
 		return nil, fmt.Errorf("zwlr_virtual_pointer_manager_v1 not available")
 	}
-	
+
 	// Create the manager proxy
 	manager := protocols.NewVirtualPointerManager(c.GetContext())
-	
+
 	// Check context before binding
 	select {
 	case <-ctx.Done():
@@ -175,7 +175,7 @@ func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, erro
 		return nil, fmt.Errorf("context cancelled before binding: %w", ctx.Err())
 	default:
 	}
-	
+
 	// Bind to the global
 	name := c.GetPointerManagerName()
 	err := c.GetRegistry().Bind(name, protocols.VirtualPointerManagerInterface, 1, manager)
@@ -183,20 +183,20 @@ func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, erro
 		_ = c.Close()
 		return nil, fmt.Errorf("failed to bind virtual pointer manager: %w", err)
 	}
-	
+
 	// Sync to ensure binding is complete with context support
 	sync, err := c.GetDisplay().Sync()
 	if err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("failed to sync: %w", err)
 	}
-	
+
 	// Wait for sync with context support
 	syncDone := make(chan error, 1)
 	go func() {
 		syncDone <- c.GetContext().RunTill(sync)
 	}()
-	
+
 	select {
 	case err = <-syncDone:
 		if err != nil {
@@ -207,7 +207,7 @@ func NewVirtualPointerManager(ctx context.Context) (*VirtualPointerManager, erro
 		_ = c.Close()
 		return nil, fmt.Errorf("context cancelled during sync: %w", ctx.Err())
 	}
-	
+
 	return &VirtualPointerManager{
 		client:  c,
 		manager: manager,
@@ -221,7 +221,7 @@ func (m *VirtualPointerManager) CreatePointer() (*VirtualPointer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create virtual pointer: %w", err)
 	}
-	
+
 	return &VirtualPointer{
 		pointer: pointer,
 	}, nil

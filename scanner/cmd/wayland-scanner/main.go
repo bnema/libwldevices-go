@@ -1,19 +1,22 @@
 // Command wayland-scanner generates Go bindings from Wayland protocol XML files.
 //
 // Usage:
-//   wayland-scanner [flags] protocol.xml
+//
+//	wayland-scanner [flags] protocol.xml
 //
 // Flags:
-//   -o, --output    Output file path (default: <protocol>_generated.go)
-//   -p, --package   Go package name (default: derived from protocol name)
-//   -h, --help      Show help
+//
+//	-o, --output    Output file path (default: <protocol>_generated.go)
+//	-p, --package   Go package name (default: derived from protocol name)
+//	-h, --help      Show help
 //
 // Examples:
-//   # Generate bindings for virtual pointer protocol
-//   wayland-scanner -o virtual_pointer.go ../wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml
 //
-//   # Generate with custom package name
-//   wayland-scanner -p vpointer -o vpointer.go protocol.xml
+//	# Generate bindings for virtual pointer protocol
+//	wayland-scanner -o virtual_pointer.go ../wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml
+//
+//	# Generate with custom package name
+//	wayland-scanner -p vpointer -o vpointer.go protocol.xml
 package main
 
 import (
@@ -76,14 +79,14 @@ func main() {
 	if packageName == "" {
 		base := filepath.Base(xmlPath)
 		base = strings.TrimSuffix(base, filepath.Ext(base))
-		
+
 		// Clean up common prefixes/suffixes
 		base = strings.TrimPrefix(base, "wlr-")
 		base = strings.TrimPrefix(base, "zwlr-")
 		base = strings.TrimSuffix(base, "-unstable-v1")
 		base = strings.TrimSuffix(base, "-unstable-v2")
 		base = strings.TrimSuffix(base, "-stable-v1")
-		
+
 		// Convert to valid Go package name
 		packageName = strings.ReplaceAll(base, "-", "_")
 	}

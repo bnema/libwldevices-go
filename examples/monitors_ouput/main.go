@@ -32,7 +32,6 @@ func main() {
 		fmt.Println("No outputs found")
 		return
 	}
-	
 
 	// Sort heads by name for consistent output
 	sort.Slice(heads, func(i, j int) bool {
@@ -73,7 +72,7 @@ func main() {
 			fmt.Println("  Modes:")
 			for _, mode := range modes {
 				fmt.Printf("    %dx%d px, %.6f Hz", mode.Width, mode.Height, mode.GetRefreshRate())
-				
+
 				markers := []string{}
 				if mode.Preferred {
 					markers = append(markers, "preferred")
@@ -81,7 +80,7 @@ func main() {
 				if head.CurrentMode != nil && mode == head.CurrentMode {
 					markers = append(markers, "current")
 				}
-				
+
 				if len(markers) > 0 {
 					fmt.Printf(" (%s)", strings.Join(markers, ", "))
 				}

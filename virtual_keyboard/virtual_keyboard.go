@@ -94,20 +94,20 @@ const (
 	KEY_LEFTCTRL  = 29
 	KEY_LEFTALT   = 56
 	KEY_LEFTMETA  = 125
-	
+
 	// Additional keys for special characters
-	KEY_MINUS        = 12  // - and _
-	KEY_EQUAL        = 13  // = and +
-	KEY_LEFTBRACE    = 26  // [ and {
-	KEY_RIGHTBRACE   = 27  // ] and }
-	KEY_SEMICOLON    = 39  // ; and :
-	KEY_APOSTROPHE   = 40  // ' and "
-	KEY_GRAVE        = 41  // ` and ~
-	KEY_BACKSLASH    = 43  // \ and |
-	KEY_COMMA        = 51  // , and <
-	KEY_DOT          = 52  // . and >
-	KEY_SLASH        = 53  // / and ?
-	KEY_RIGHTSHIFT   = 54
+	KEY_MINUS      = 12 // - and _
+	KEY_EQUAL      = 13 // = and +
+	KEY_LEFTBRACE  = 26 // [ and {
+	KEY_RIGHTBRACE = 27 // ] and }
+	KEY_SEMICOLON  = 39 // ; and :
+	KEY_APOSTROPHE = 40 // ' and "
+	KEY_GRAVE      = 41 // ` and ~
+	KEY_BACKSLASH  = 43 // \ and |
+	KEY_COMMA      = 51 // , and <
+	KEY_DOT        = 52 // . and >
+	KEY_SLASH      = 53 // / and ?
+	KEY_RIGHTSHIFT = 54
 )
 
 // Key state constants
@@ -152,19 +152,19 @@ func NewVirtualKeyboardManager(ctx context.Context) (*VirtualKeyboardManager, er
 		return nil, ctx.Err()
 	default:
 	}
-	
+
 	// Create Wayland client with timeout
 	type clientResult struct {
 		client *client.Client
 		err    error
 	}
-	
+
 	clientCh := make(chan clientResult, 1)
 	go func() {
 		c, err := client.NewClient()
 		clientCh <- clientResult{client: c, err: err}
 	}()
-	
+
 	// Wait for client creation or context cancellation
 	var c *client.Client
 	select {
@@ -190,7 +190,7 @@ func NewVirtualKeyboardManager(ctx context.Context) (*VirtualKeyboardManager, er
 		return nil, fmt.Errorf("context cancelled before binding: %w", ctx.Err())
 	default:
 	}
-	
+
 	// Create the manager proxy
 	manager := protocols.NewVirtualKeyboardManager(c.GetContext())
 
@@ -257,10 +257,10 @@ func (k *VirtualKeyboard) setDefaultKeymap() error {
 	}
 
 	k.keymapSet = true
-	
+
 	// Don't close the FD - the compositor needs to read it
 	// The compositor will close it when done
-	
+
 	// Do a roundtrip to ensure the keymap is processed
 	err = k.client.GetDisplay().Roundtrip()
 	if err != nil {
@@ -268,7 +268,7 @@ func (k *VirtualKeyboard) setDefaultKeymap() error {
 	}
 
 	// Note: FD is closed by the compositor after reading
-	
+
 	return nil
 }
 

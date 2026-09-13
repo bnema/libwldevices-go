@@ -281,7 +281,7 @@ func demonstrateModifierStates(keyboard *virtual_keyboard.VirtualKeyboard) error
 				return fmt.Errorf("failed to type space: %v", err)
 			}
 		} else if char >= 'A' && char <= 'Z' {
-			key := virtual_keyboard.KEY_A + uint32(char - 'A')
+			key := virtual_keyboard.KEY_A + uint32(char-'A')
 			if err := keyboard.TypeKey(key); err != nil {
 				return fmt.Errorf("failed to type character: %v", err)
 			}

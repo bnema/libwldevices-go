@@ -243,11 +243,13 @@
 // # Examples and Testing
 //
 // **Interactive Examples:**
+//
 //	go run examples/virtual_pointer/main.go
 //	go run examples/virtual_keyboard/main.go
 //	go run examples/monitors_output/main.go
 //
 // **Tests:**
+//
 //	go test ./...
 //	go test -v ./virtual_pointer
 //
@@ -266,6 +268,7 @@
 // • Wayland compositor with virtual input support
 //
 // **Verification:**
+//
 //	wayland-info | grep -E "(virtual_pointer|virtual_keyboard|pointer_constraints|output_management)"
 //
 // Should show the required protocol interfaces.
