@@ -9,10 +9,10 @@ import (
 )
 
 // FIXTURE_STATE_IDLE is the fixture_state idle value.
-const FIXTURE_STATE_IDLE int32 = 0
+const FIXTURE_STATE_IDLE = 0
 
 // FIXTURE_STATE_BUSY is the fixture_state busy value.
-const FIXTURE_STATE_BUSY int32 = 1
+const FIXTURE_STATE_BUSY = 1
 
 // FixtureManagerInterface is the protocol interface name.
 const FixtureManagerInterface = "zwlr_fixture_manager_v1"

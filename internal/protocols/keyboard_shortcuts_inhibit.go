@@ -9,7 +9,7 @@ import (
 )
 
 // ERROR_ALREADY_INHIBITED is the error already_inhibited value.
-const ERROR_ALREADY_INHIBITED int32 = 0
+const ERROR_ALREADY_INHIBITED = 0
 
 // KeyboardShortcutsInhibitManagerInterface is the protocol interface name.
 const KeyboardShortcutsInhibitManagerInterface = "zwp_keyboard_shortcuts_inhibit_manager_v1"

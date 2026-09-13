@@ -20,7 +20,7 @@ import (
 
 {{range .Constants}}
 // {{.Name}} is the {{.Enum}} {{.Entry}} value.
-const {{.Name}} {{.Type}} = {{.Value}}
+const {{.Name}}{{if .Type}} {{.Type}}{{end}} = {{.Value}}
 {{- end}}
 {{range .Interfaces}}
 {{- $iface := .}}

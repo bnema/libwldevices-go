@@ -254,10 +254,12 @@ func (s *Scanner) prepareTemplateData(packageName string) (templateData, error) 
 
 		for _, enum := range iface.Enums {
 			for _, entry := range enum.Entries {
+				// Enum values are emitted untyped: the same enum travels as a uint
+				// in one protocol and as an int in another, and an untyped constant
+				// assigns to either without casts at the call site.
 				data.Constants = append(data.Constants, constantData{
 					Name:  s.toConstantName(iface.Name, enum.Name, entry.Name),
 					Value: entry.Value,
-					Type:  "int32",
 					Enum:  enum.Name,
 					Entry: entry.Name,
 				})
