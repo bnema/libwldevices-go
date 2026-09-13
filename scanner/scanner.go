@@ -250,6 +250,20 @@ func (s *Scanner) prepareTemplateData(packageName string) (templateData, error) 
 	stdImports := []string{}
 	needsSync := false
 
+	// Enum constants are package-level declarations, so two interfaces that
+	// declare the same enum entry (for example xdg_surface.error.invalid_size
+	// and xdg_toplevel.error.invalid_size) would collide. Entries whose name
+	// occurs in more than one interface are qualified with their interface
+	// name below; unique names keep their historical, unprefixed form.
+	enumEntryCounts := map[string]int{}
+	for _, iface := range s.protocol.Interfaces {
+		for _, enum := range iface.Enums {
+			for _, entry := range enum.Entries {
+				enumEntryCounts[constantName(enum.Name, entry.Name)]++
+			}
+		}
+	}
+
 	for _, iface := range s.protocol.Interfaces {
 		ifaceData, err := s.processInterface(iface)
 		if err != nil {
@@ -262,11 +276,15 @@ func (s *Scanner) prepareTemplateData(packageName string) (templateData, error) 
 
 		for _, enum := range iface.Enums {
 			for _, entry := range enum.Entries {
+				name := constantName(enum.Name, entry.Name)
+				if enumEntryCounts[name] > 1 {
+					name = qualifiedConstantName(iface.Name, enum.Name, entry.Name)
+				}
 				// Enum values are emitted untyped: the same enum travels as a uint
 				// in one protocol and as an int in another, and an untyped constant
 				// assigns to either without casts at the call site.
 				data.Constants = append(data.Constants, constantData{
-					Name:  s.toConstantName(iface.Name, enum.Name, entry.Name),
+					Name:  name,
 					Value: entry.Value,
 					Enum:  enum.Name,
 					Entry: entry.Name,
@@ -583,18 +601,28 @@ func (s *Scanner) toGoName(name string) string {
 	return strings.Join(parts, "")
 }
 
-func (s *Scanner) toConstantName(iface, enum, entry string) string {
-	join := func(value string) []string {
-		parts := strings.Split(value, "_")
-		out := make([]string, 0, len(parts))
-		for _, part := range parts {
-			if part != "" {
-				out = append(out, strings.ToUpper(part))
-			}
+// constantName renders an enum entry as the unprefixed constant name.
+func constantName(enum, entry string) string {
+	return strings.Join(append(joinName(enum), joinName(entry)...), "_")
+}
+
+// qualifiedConstantName prefixes an enum entry constant with its interface
+// name. It is used for entries that several interfaces declare, which would
+// otherwise collide in the generated package.
+func qualifiedConstantName(iface, enum, entry string) string {
+	return strings.Join(append(joinName(iface), constantName(enum, entry)), "_")
+}
+
+// joinName upper-cases the underscore-separated parts of a protocol name.
+func joinName(value string) []string {
+	parts := strings.Split(value, "_")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, strings.ToUpper(part))
 		}
-		return out
 	}
-	return strings.Join(append(join(enum), join(entry)...), "_")
+	return out
 }
 
 // formatDescription renders an argument or request description as a single
