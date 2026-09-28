@@ -37,7 +37,7 @@ import (
 
 	"github.com/bnema/libwldevices-go/internal/client"
 	"github.com/bnema/libwldevices-go/internal/protocols"
-	"github.com/bnema/wlturbo/wl"
+	"github.com/bnema/wlturbo/protocol/core"
 )
 
 // Error constants for keyboard shortcuts inhibitor
@@ -101,8 +101,8 @@ func NewKeyboardShortcutsInhibitorManagerWithClient(c *client.Client) (*Keyboard
 type KeyboardShortcutsInhibitor struct {
 	manager   *KeyboardShortcutsInhibitorManager
 	inhibitor *protocols.KeyboardShortcutsInhibitor
-	surface   *wl.Surface
-	seat      *wl.Seat
+	surface   *core.Surface
+	seat      *core.Seat
 
 	mu               sync.Mutex
 	active           bool
@@ -190,7 +190,7 @@ func NewKeyboardShortcutsInhibitorManager(ctx context.Context) (*KeyboardShortcu
 // InhibitShortcuts creates a keyboard shortcuts inhibitor for a surface and seat.
 // The inhibitor instructs the compositor to ignore its own keyboard shortcuts
 // when the associated surface has keyboard focus.
-func (m *KeyboardShortcutsInhibitorManager) InhibitShortcuts(surface *wl.Surface, seat *wl.Seat) (*KeyboardShortcutsInhibitor, error) {
+func (m *KeyboardShortcutsInhibitorManager) InhibitShortcuts(surface *core.Surface, seat *core.Seat) (*KeyboardShortcutsInhibitor, error) {
 	m.mu.Lock()
 	destroyed := m.destroyed
 	m.mu.Unlock()
@@ -280,12 +280,12 @@ func (m *KeyboardShortcutsInhibitorManager) Destroy() error {
 }
 
 // Surface returns the surface this inhibitor is associated with.
-func (i *KeyboardShortcutsInhibitor) Surface() *wl.Surface {
+func (i *KeyboardShortcutsInhibitor) Surface() *core.Surface {
 	return i.surface
 }
 
 // Seat returns the seat this inhibitor is associated with.
-func (i *KeyboardShortcutsInhibitor) Seat() *wl.Seat {
+func (i *KeyboardShortcutsInhibitor) Seat() *core.Seat {
 	return i.seat
 }
 
@@ -358,15 +358,15 @@ func (i *KeyboardShortcutsInhibitor) Destroy() error {
 
 // CreateTemporaryInhibitor creates an inhibitor that can be easily destroyed later.
 // This is useful for temporary exclusive keyboard access.
-func CreateTemporaryInhibitor(manager *KeyboardShortcutsInhibitorManager, surface *wl.Surface, seat *wl.Seat) (*KeyboardShortcutsInhibitor, error) {
+func CreateTemporaryInhibitor(manager *KeyboardShortcutsInhibitorManager, surface *core.Surface, seat *core.Seat) (*KeyboardShortcutsInhibitor, error) {
 	return manager.InhibitShortcuts(surface, seat)
 }
 
 // InhibitorStatus represents the status of a keyboard shortcuts inhibitor.
 type InhibitorStatus struct {
 	Active  bool
-	Surface *wl.Surface
-	Seat    *wl.Seat
+	Surface *core.Surface
+	Seat    *core.Seat
 }
 
 // GetStatus returns the current status of the inhibitor.

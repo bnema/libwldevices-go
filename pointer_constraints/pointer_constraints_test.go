@@ -9,7 +9,7 @@ import (
 	"github.com/bnema/libwldevices-go/internal/protocols"
 	"github.com/bnema/libwldevices-go/internal/testcompositor"
 	"github.com/bnema/wlturbo"
-	"github.com/bnema/wlturbo/wl"
+	"github.com/bnema/wlturbo/protocol/core"
 )
 
 // Global name announced by the test compositor.
@@ -43,21 +43,21 @@ func newManager(t *testing.T, srv *testcompositor.Server) *PointerConstraintsMan
 
 // newSurfacePointerRegion creates client-side proxies with fresh object IDs so
 // the manager has concrete objects to reference in its requests.
-func newSurfacePointerRegion(t *testing.T, manager *PointerConstraintsManager) (*wl.Surface, *wl.Pointer, *wl.Region) {
+func newSurfacePointerRegion(t *testing.T, manager *PointerConstraintsManager) (*core.Surface, *core.Pointer, *core.Region) {
 	t.Helper()
 
 	ctx := manager.client.GetContext()
 
-	surface := wl.NewSurface(ctx)
+	surface := core.NewSurface(ctx)
 	surface.SetID(ctx.AllocateID())
 	ctx.Register(surface)
 
-	pointer := &wl.Pointer{}
+	pointer := &core.Pointer{}
 	pointer.SetID(ctx.AllocateID())
 	pointer.SetContext(ctx)
 	ctx.Register(pointer)
 
-	region := &wl.Region{}
+	region := &core.Region{}
 	region.SetID(ctx.AllocateID())
 	region.SetContext(ctx)
 	ctx.Register(region)
@@ -355,7 +355,7 @@ func TestInvalidArgumentTypes(t *testing.T) {
 				_, err := manager.LockPointer("surface", nil, nil, LifetimeOneshot)
 				return err
 			},
-			want: "pointer constraints error -1: surface must be a *wl.Surface",
+			want: "pointer constraints error -1: surface must be a *core.Surface",
 		},
 		{
 			name: "pointer",
@@ -363,7 +363,7 @@ func TestInvalidArgumentTypes(t *testing.T) {
 				_, err := manager.ConfinePointer(nil, "pointer", nil, LifetimeOneshot)
 				return err
 			},
-			want: "pointer constraints error -1: pointer must be a *wl.Pointer",
+			want: "pointer constraints error -1: pointer must be a *core.Pointer",
 		},
 		{
 			name: "region",
@@ -371,7 +371,7 @@ func TestInvalidArgumentTypes(t *testing.T) {
 				_, err := manager.LockPointer(nil, nil, "region", LifetimeOneshot)
 				return err
 			},
-			want: "pointer constraints error -1: region must be a *wl.Region",
+			want: "pointer constraints error -1: region must be a *core.Region",
 		},
 		{
 			name: "invalid lifetime",
@@ -404,7 +404,7 @@ func TestInvalidArgumentTypes(t *testing.T) {
 	}
 	if err := locked.SetRegion("region"); err == nil {
 		t.Error("SetRegion succeeded with a non-region argument")
-	} else if got := err.Error(); got != "pointer constraints error -1: region must be a *wl.Region" {
+	} else if got := err.Error(); got != "pointer constraints error -1: region must be a *core.Region" {
 		t.Errorf("SetRegion error = %q, want the non-region message", got)
 	}
 
@@ -414,7 +414,7 @@ func TestInvalidArgumentTypes(t *testing.T) {
 	}
 	if err := confined.SetRegion("region"); err == nil {
 		t.Error("SetRegion succeeded with a non-region argument")
-	} else if got := err.Error(); got != "pointer constraints error -1: region must be a *wl.Region" {
+	} else if got := err.Error(); got != "pointer constraints error -1: region must be a *core.Region" {
 		t.Errorf("SetRegion error = %q, want the non-region message", got)
 	}
 }

@@ -26,6 +26,7 @@ import (
 
 	"github.com/bnema/libwldevices-go/internal/client"
 	"github.com/bnema/libwldevices-go/internal/protocols"
+	"github.com/bnema/wlturbo/protocol/core"
 	"github.com/bnema/wlturbo/wl"
 )
 
@@ -47,7 +48,7 @@ const (
 // PointerConstraintsManager manages pointer constraints
 type PointerConstraintsManager struct {
 	client  *client.Client
-	manager *protocols.PointerConstraintsManager
+	manager *protocols.PointerConstraints
 }
 
 // LockedPointer represents a locked pointer constraint
@@ -129,7 +130,7 @@ func NewPointerConstraintsManager(ctx context.Context) (*PointerConstraintsManag
 	wayland_context := c.GetContext()
 
 	// Create and bind pointer constraints manager using detected name
-	pcm.manager = protocols.NewPointerConstraintsManager(wayland_context)
+	pcm.manager = protocols.NewPointerConstraints(wayland_context)
 	err := registry.Bind(managerName, protocols.PointerConstraintsInterface, 1, pcm.manager)
 	if err != nil {
 		_ = c.Close()
@@ -172,27 +173,27 @@ func (pcm *PointerConstraintsManager) LockPointer(surface interface{}, pointer i
 	}
 
 	// Convert interfaces to proper Wayland types
-	wlSurface, ok := surface.(*wl.Surface)
+	wlSurface, ok := surface.(*core.Surface)
 	if !ok && surface != nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
-			Message: "surface must be a *wl.Surface",
+			Message: "surface must be a *core.Surface",
 		}
 	}
 
-	wlPointer, ok := pointer.(*wl.Pointer)
+	wlPointer, ok := pointer.(*core.Pointer)
 	if !ok && pointer != nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
-			Message: "pointer must be a *wl.Pointer",
+			Message: "pointer must be a *core.Pointer",
 		}
 	}
 
-	wlRegion, ok := region.(*wl.Region)
+	wlRegion, ok := region.(*core.Region)
 	if !ok && region != nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
-			Message: "region must be a *wl.Region",
+			Message: "region must be a *core.Region",
 		}
 	}
 
@@ -224,27 +225,27 @@ func (pcm *PointerConstraintsManager) ConfinePointer(surface interface{}, pointe
 	}
 
 	// Convert interfaces to proper Wayland types
-	wlSurface, ok := surface.(*wl.Surface)
+	wlSurface, ok := surface.(*core.Surface)
 	if !ok && surface != nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
-			Message: "surface must be a *wl.Surface",
+			Message: "surface must be a *core.Surface",
 		}
 	}
 
-	wlPointer, ok := pointer.(*wl.Pointer)
+	wlPointer, ok := pointer.(*core.Pointer)
 	if !ok && pointer != nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
-			Message: "pointer must be a *wl.Pointer",
+			Message: "pointer must be a *core.Pointer",
 		}
 	}
 
-	wlRegion, ok := region.(*wl.Region)
+	wlRegion, ok := region.(*core.Region)
 	if !ok && region != nil {
 		return nil, &PointerConstraintsError{
 			Code:    -1,
-			Message: "region must be a *wl.Region",
+			Message: "region must be a *core.Region",
 		}
 	}
 
@@ -272,7 +273,7 @@ func (lp *LockedPointer) Destroy() error {
 // SetCursorPositionHint provides a hint about where the cursor should be positioned
 func (lp *LockedPointer) SetCursorPositionHint(surfaceX, surfaceY float64) error {
 	if lp.locked != nil {
-		return lp.locked.SetCursorPositionHint(surfaceX, surfaceY)
+		return lp.locked.SetCursorPositionHint(wl.Fixed(surfaceX*256), wl.Fixed(surfaceY*256))
 	}
 	return &PointerConstraintsError{
 		Code:    -1,
@@ -289,11 +290,11 @@ func (lp *LockedPointer) SetRegion(region interface{}) error {
 		}
 	}
 
-	wlRegion, ok := region.(*wl.Region)
+	wlRegion, ok := region.(*core.Region)
 	if !ok && region != nil {
 		return &PointerConstraintsError{
 			Code:    -1,
-			Message: "region must be a *wl.Region",
+			Message: "region must be a *core.Region",
 		}
 	}
 
@@ -319,11 +320,11 @@ func (cp *ConfinedPointer) SetRegion(region interface{}) error {
 		}
 	}
 
-	wlRegion, ok := region.(*wl.Region)
+	wlRegion, ok := region.(*core.Region)
 	if !ok && region != nil {
 		return &PointerConstraintsError{
 			Code:    -1,
-			Message: "region must be a *wl.Region",
+			Message: "region must be a *core.Region",
 		}
 	}
 
@@ -345,20 +346,4 @@ func LockPointerPersistent(manager *PointerConstraintsManager, surface interface
 // ConfinePointerToRegion confines the pointer to a specific region with oneshot lifetime.
 func ConfinePointerToRegion(manager *PointerConstraintsManager, surface interface{}, pointer interface{}, region interface{}) (*ConfinedPointer, error) {
 	return manager.ConfinePointer(surface, pointer, region, LIFETIME_ONESHOT)
-}
-
-// globalHandler is a helper type for handling registry globals
-type globalHandler struct {
-	found   *bool
-	name    *uint32
-	version *uint32
-}
-
-// HandleRegistryGlobal implements the RegistryGlobalHandler interface
-func (h *globalHandler) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
-	if event.Interface == protocols.PointerConstraintsInterface {
-		*h.found = true
-		*h.name = event.Name
-		*h.version = event.Version
-	}
 }

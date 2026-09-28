@@ -46,6 +46,7 @@ func main() {
 		log.Printf("Failed to create virtual pointer: %v", err)
 		return
 	}
+	_ = demonstrateAdvancedFeatures // Optional walkthrough; basic example exercises common actions.
 	defer func() {
 		fmt.Println("8. Closing virtual pointer...")
 		if err := pointer.Close(); err != nil {

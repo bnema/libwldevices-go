@@ -7,20 +7,18 @@
 // as one machine-readable FIXTURE_EVENT line so the harness output proves that
 // injected input reached a client, not merely that requests were accepted.
 //
-// The transport ships typed wl_pointer/wl_keyboard wrappers without event
-// dispatch, so the fixture instantiates the scanner-generated core bindings in
-// internal/waylandcore and creates the pointer/keyboard objects itself. That
-// keeps event decoding in generated code instead of hand-written demarshalling.
+// WLTurbo generated core bindings decode pointer and keyboard events.
 package main
 
 import (
 	"fmt"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bnema/libwldevices-go/internal/client"
-	"github.com/bnema/libwldevices-go/internal/waylandcore"
-	"github.com/bnema/libwldevices-go/internal/xdgshell"
+	"github.com/bnema/wlturbo/protocol/core"
+	"github.com/bnema/wlturbo/protocol/xdgshell"
 	"github.com/bnema/wlturbo/wl"
 )
 
@@ -48,15 +46,15 @@ type fixture struct {
 	mu  sync.Mutex
 	ctx *wl.Context
 
-	surface    *wl.Surface
+	surface    *core.Surface
 	xdgSurface *xdgshell.XdgSurface
 	toplevel   *xdgshell.XdgToplevel
-	seat       *waylandcore.Seat
-	pointer    *waylandcore.Pointer
-	keyboard   *waylandcore.Keyboard
+	seat       *core.Seat
+	pointer    *core.Pointer
+	keyboard   *core.Keyboard
 
 	// shm pool backing the toplevel buffer.
-	pool       *waylandcore.ShmPool
+	pool       *core.ShmPool
 	poolData   []byte
 	poolOffset int
 
@@ -70,7 +68,7 @@ type fixture struct {
 	configureW    int32
 	configureH    int32
 
-	buffer  *wl.BaseProxy
+	buffer  *core.Buffer
 	bufferW int32
 	bufferH int32
 	mapped  bool
@@ -113,30 +111,10 @@ func startFixture(c *client.Client) (*fixture, error) {
 
 	f := &fixture{ctx: ctx}
 
-	compositorGlobal, ok := registry.FindGlobal("wl_compositor")
-	if !ok {
-		return nil, fmt.Errorf("wl_compositor global missing")
-	}
-	shmGlobal, ok := registry.FindGlobal("wl_shm")
-	if !ok {
-		return nil, fmt.Errorf("wl_shm global missing")
-	}
-	seatGlobal, ok := registry.FindGlobal("wl_seat")
-	if !ok {
-		return nil, fmt.Errorf("wl_seat global missing")
-	}
-	xdgGlobal, ok := registry.FindGlobal("xdg_wm_base")
-	if !ok {
-		return nil, fmt.Errorf("xdg_wm_base global missing")
-	}
-
-	compositor := waylandcore.NewCompositor(ctx)
-	compositorID, err := registry.BindID(compositorGlobal.Name, "wl_compositor", compositorGlobal.Version)
-	if err != nil {
+	compositor := core.NewCompositor(ctx)
+	if _, err := registry.BindNegotiated("wl_compositor", 6, compositor); err != nil {
 		return nil, fmt.Errorf("bind wl_compositor: %w", err)
 	}
-	compositor.SetID(compositorID)
-	ctx.Register(compositor)
 
 	surface, err := compositor.CreateSurface()
 	if err != nil {
@@ -145,12 +123,9 @@ func startFixture(c *client.Client) (*fixture, error) {
 	f.surface = surface
 
 	wmBase := xdgshell.NewXdgWmBase(ctx)
-	wmBaseID, err := registry.BindID(xdgGlobal.Name, "xdg_wm_base", xdgGlobal.Version)
-	if err != nil {
+	if _, err := registry.BindNegotiated("xdg_wm_base", 6, wmBase); err != nil {
 		return nil, fmt.Errorf("bind xdg_wm_base: %w", err)
 	}
-	wmBase.SetID(wmBaseID)
-	ctx.Register(wmBase)
 	wmBase.OnPing(func(serial uint32) {
 		// Ignoring a ping lets the compositor declare the client unresponsive.
 		_ = wmBase.Pong(serial)
@@ -180,13 +155,10 @@ func startFixture(c *client.Client) (*fixture, error) {
 
 	// The seat is bound separately so the generated core bindings can be used
 	// to create a wl_pointer/wl_keyboard whose dispatch decodes events.
-	seat := waylandcore.NewSeat(ctx)
-	seatID, err := registry.BindID(seatGlobal.Name, "wl_seat", seatGlobal.Version)
-	if err != nil {
+	seat := core.NewSeat(ctx)
+	if _, err := registry.BindNegotiated("wl_seat", 7, seat); err != nil {
 		return nil, fmt.Errorf("bind wl_seat: %w", err)
 	}
-	seat.SetID(seatID)
-	ctx.Register(seat)
 	seat.OnCapabilities(func(caps uint32) {
 		f.mu.Lock()
 		f.seatCaps = caps
@@ -195,17 +167,11 @@ func startFixture(c *client.Client) (*fixture, error) {
 	})
 	f.seat = seat
 
-	// wl_shm pool backing the toplevel buffer. The scanner returns the pool as
-	// a generic wl.BaseProxy because wl_shm_pool is not in its core type table,
-	// so the generated ShmPool type is instantiated directly and create_pool is
-	// sent for it.
-	shm := waylandcore.NewShm(ctx)
-	shmID, err := registry.BindID(shmGlobal.Name, "wl_shm", shmGlobal.Version)
-	if err != nil {
+	// WLTurbo's generated shm binding owns the concrete pool and its FD transfer.
+	shm := core.NewShm(ctx)
+	if _, err := registry.BindNegotiated("wl_shm", 1, shm); err != nil {
 		return nil, fmt.Errorf("bind wl_shm: %w", err)
 	}
-	shm.SetID(shmID)
-	ctx.Register(shm)
 
 	poolSize := fixtureMaxW * fixtureMaxH * 4 * 2
 	fd, err := wl.CreateAnonymousFile(int64(poolSize))
@@ -214,19 +180,18 @@ func startFixture(c *client.Client) (*fixture, error) {
 	}
 	data, err := wl.MapMemory(fd, poolSize)
 	if err != nil {
+		_ = syscall.Close(fd)
 		return nil, fmt.Errorf("map shm file: %w", err)
 	}
 	f.poolData = data
 
-	pool := waylandcore.NewShmPool(ctx)
-	poolID := ctx.AllocateID()
-	pool.SetID(poolID)
-	ctx.Register(pool)
-	// Mirrors the scanner's create_pool encoding: the descriptor index travels
-	// out of band (the transport marshals the uintptr argument to nothing).
-	if err := ctx.SendRequestWithFDs(shm, 0, []int{fd}, pool, uintptr(fd), int32(poolSize)); err != nil {
+	pool, err := shm.CreatePool(fd, int32(poolSize))
+	if err != nil {
+		_ = wl.UnmapMemory(data)
+		_ = syscall.Close(fd)
 		return nil, fmt.Errorf("create shm pool: %w", err)
 	}
+
 	f.pool = pool
 
 	// Commit an empty surface to receive the first configure, then a buffer.
@@ -304,7 +269,7 @@ func (f *fixture) waitPointerCapability(c *client.Client) bool {
 	return f.pumpUntil(c, "wl_pointer capability", func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.seatCaps&wl.SeatCapabilityPointer != 0
+		return f.seatCaps&core.CAPABILITY_POINTER != 0
 	})
 }
 
@@ -313,17 +278,14 @@ func (f *fixture) waitKeyboardCapability(c *client.Client) bool {
 	return f.pumpUntil(c, "wl_keyboard capability", func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.seatCaps&wl.SeatCapabilityKeyboard != 0
+		return f.seatCaps&core.CAPABILITY_KEYBOARD != 0
 	})
 }
 
 // bindPointer creates a wl_pointer object and registers its event handlers.
 func (f *fixture) bindPointer() error {
-	pointer := waylandcore.NewPointer(f.ctx)
-	id := f.ctx.AllocateID()
-	pointer.SetID(id)
-	f.ctx.Register(pointer)
-	if err := f.ctx.SendRequest(f.seat, 0, id); err != nil {
+	pointer, err := f.seat.GetPointer()
+	if err != nil {
 		return fmt.Errorf("wl_seat.get_pointer: %w", err)
 	}
 
@@ -368,13 +330,11 @@ func (f *fixture) bindPointer() error {
 
 // bindKeyboard creates a wl_keyboard object and registers its event handlers.
 func (f *fixture) bindKeyboard() error {
-	keyboard := waylandcore.NewKeyboard(f.ctx)
-	id := f.ctx.AllocateID()
-	keyboard.SetID(id)
-	f.ctx.Register(keyboard)
-	if err := f.ctx.SendRequest(f.seat, 1, id); err != nil {
+	keyboard, err := f.seat.GetKeyboard()
+	if err != nil {
 		return fmt.Errorf("wl_seat.get_keyboard: %w", err)
 	}
+	keyboard.OnKeymap(func(_ uint32, fd *wl.OwnedFD, _ uint32) { _ = fd.Close() })
 
 	keyboard.OnEnter(func(serial uint32, surfaceID uint32, keys []byte) {
 		f.mu.Lock()
@@ -484,7 +444,7 @@ func (f *fixture) createBufferLocked(width, height int32) error {
 	if f.poolOffset+size > len(f.poolData) {
 		return fmt.Errorf("shm pool exhausted: need %d bytes at offset %d of %d", size, f.poolOffset, len(f.poolData))
 	}
-	buffer, err := f.pool.CreateBuffer(int32(f.poolOffset), width, height, stride, waylandcore.FORMAT_XRGB8888)
+	buffer, err := f.pool.CreateBuffer(int32(f.poolOffset), width, height, stride, core.FORMAT_XRGB8888)
 	if err != nil {
 		return fmt.Errorf("create wl_buffer: %w", err)
 	}

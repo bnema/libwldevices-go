@@ -10,7 +10,7 @@ import (
 	"github.com/bnema/libwldevices-go/internal/protocols"
 	"github.com/bnema/libwldevices-go/internal/testcompositor"
 	"github.com/bnema/wlturbo"
-	"github.com/bnema/wlturbo/wl"
+	"github.com/bnema/wlturbo/protocol/core"
 )
 
 // Globals announced by the test compositor. The manager name mirrors the value
@@ -53,18 +53,15 @@ func newManager(t *testing.T, srv *testcompositor.Server) *KeyboardShortcutsInhi
 
 // newSurfaceSeat binds wl_compositor, creates a surface through it and returns
 // the seat the client bound from the wl_seat global.
-func newSurfaceSeat(t *testing.T, manager *KeyboardShortcutsInhibitorManager) (*wl.Surface, *wl.Seat) {
+func newSurfaceSeat(t *testing.T, manager *KeyboardShortcutsInhibitorManager) (*core.Surface, *core.Seat) {
 	t.Helper()
 
 	ctx := manager.client.GetContext()
-
-	compositorID, err := manager.client.GetRegistry().BindID(compositorGlobalName, "wl_compositor", 6)
+	compositor := core.NewCompositor(ctx)
+	_, err := manager.client.GetRegistry().BindNegotiated("wl_compositor", 6, compositor)
 	if err != nil {
 		t.Fatalf("bind wl_compositor: %v", err)
 	}
-	compositor := wl.NewCompositor(ctx)
-	compositor.SetID(compositorID)
-	ctx.Register(compositor)
 
 	surface, err := compositor.CreateSurface()
 	if err != nil {
@@ -364,8 +361,8 @@ func TestInhibitShortcutsWithNilArguments(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		surface *wl.Surface
-		seat    *wl.Seat
+		surface *core.Surface
+		seat    *core.Seat
 		want    string
 	}{
 		{name: "surface", surface: nil, seat: seat, want: "keyboard shortcuts inhibitor error -1: surface cannot be nil"},

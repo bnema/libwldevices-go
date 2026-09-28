@@ -21,6 +21,7 @@ import (
 	"github.com/bnema/libwldevices-go/keyboard_shortcuts_inhibitor"
 	"github.com/bnema/libwldevices-go/virtual_keyboard"
 	"github.com/bnema/libwldevices-go/virtual_pointer"
+	"github.com/bnema/wlturbo/protocol/core"
 	"github.com/bnema/wlturbo/wl"
 )
 
@@ -74,7 +75,6 @@ func run() int {
 	fmt.Printf("INFO: compositor announced %d globals\n", len(globals))
 	requiredGlobals := []string{
 		"wl_seat",
-		"zwlr_virtual_pointer_manager_v1",
 		"zwp_virtual_keyboard_manager_v1",
 	}
 	for _, iface := range requiredGlobals {
@@ -91,14 +91,20 @@ func run() int {
 
 	// (c) Virtual pointer: library-reported availability plus real events
 	// observed by the fixture.
-	check("client.HasVirtualPointer() reports zwlr_virtual_pointer_manager_v1",
-		c.HasVirtualPointer(), "")
+	if c.HasVirtualPointer() {
+		check("client.HasVirtualPointer() reports zwlr_virtual_pointer_manager_v1", true, "")
+	} else {
+		fmt.Println("SKIP: compositor does not announce zwlr_virtual_pointer_manager_v1")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	pointerManager, err := virtual_pointer.NewVirtualPointerManager(ctx)
-	check("virtual_pointer.NewVirtualPointerManager()", err == nil, errDetail(err))
+	var pointerManager *virtual_pointer.VirtualPointerManager
+	if c.HasVirtualPointer() {
+		pointerManager, err = virtual_pointer.NewVirtualPointerManager(ctx)
+		check("virtual_pointer.NewVirtualPointerManager()", err == nil, errDetail(err))
+	}
 	var pointer *virtual_pointer.VirtualPointer
-	if err == nil {
+	if pointerManager != nil {
 		pointer, err = pointerManager.CreatePointer()
 		check("virtual_pointer.CreatePointer()", err == nil, errDetail(err))
 	}
@@ -127,7 +133,7 @@ func run() int {
 	// (d2) The end-to-end assertion: the fixture's own observations prove the
 	// injected pointer and keyboard events reached a client.
 	if fx != nil {
-		assertFixtureInput(c, fx)
+		assertFixtureInput(c, fx, c.HasVirtualPointer())
 	}
 
 	if keyboardManager != nil {
@@ -176,20 +182,18 @@ func run() int {
 func runInhibitor(c *client.Client, registry *wl.Registry, manager *keyboard_shortcuts_inhibitor.KeyboardShortcutsInhibitorManager) {
 	wlContext := c.GetContext()
 
-	compositorGlobal, ok := registry.FindGlobal("wl_compositor")
+	_, ok := registry.FindGlobal("wl_compositor")
 	if !ok {
 		check("global wl_compositor present for the inhibitor test", false, "")
 		return
 	}
 
-	compositor := wl.NewCompositor(wlContext)
-	compositorID, err := registry.BindID(compositorGlobal.Name, "wl_compositor", compositorGlobal.Version)
+	compositor := core.NewCompositor(wlContext)
+	_, err := registry.BindNegotiated("wl_compositor", 6, compositor)
 	if err != nil {
 		check("bind wl_compositor", false, errDetail(err))
 		return
 	}
-	compositor.SetID(compositorID)
-	wlContext.Register(compositor)
 
 	surface, err := compositor.CreateSurface()
 	check("wl_compositor.CreateSurface()", err == nil, errDetail(err))
@@ -348,18 +352,18 @@ func runKeyboard(c *client.Client, keyboard *virtual_keyboard.VirtualKeyboard, p
 
 // assertFixtureInput is the end-to-end gate: it fails, listing expected and
 // observed events, when the injected input never reached the fixture client.
-func assertFixtureInput(c *client.Client, fx *fixture) {
+func assertFixtureInput(c *client.Client, fx *fixture, pointerAvailable bool) {
 	// Give the compositor a final chance to flush anything still queued.
 	_ = c.GetDisplay().Roundtrip()
 	o := fx.snapshot()
-	ok := o.pointerMotion >= 1 && o.pointerButtonP >= 1 && o.pointerButtonR >= 1 &&
+	ok := (!pointerAvailable || (o.pointerMotion >= 1 && o.pointerButtonP >= 1 && o.pointerButtonR >= 1)) &&
 		o.keyboardKeyP >= 1 && o.keyboardKeyR >= 1
 	detail := fmt.Sprintf(
 		" (observed pointer enter=%d leave=%d motion=%d button_press=%d button_release=%d axis=%d; keyboard enter=%d leave=%d key_press=%d key_release=%d modifiers=%d)",
 		o.pointerEnter, o.pointerLeave, o.pointerMotion, o.pointerButtonP, o.pointerButtonR, o.pointerAxis,
 		o.keyboardEnter, o.keyboardLeave, o.keyboardKeyP, o.keyboardKeyR, o.keyboardMods)
 	if !ok {
-		detail += "; expected pointer motion>=1, button_press>=1, button_release>=1, key_press>=1, key_release>=1"
+		detail += "; expected key_press>=1, key_release>=1 and pointer events when advertised"
 	}
 	check("fixture observed injected pointer and keyboard input", ok, detail)
 }

@@ -10,15 +10,15 @@ import (
 	"log"
 
 	"github.com/bnema/libwldevices-go/pointer_constraints"
-	"github.com/bnema/wlturbo/wl"
+	"github.com/bnema/wlturbo/protocol/core"
 )
 
 // Application represents your Wayland application
 type Application struct {
 	// Your window toolkit components would go here
-	surface    *wl.Surface
-	pointer    *wl.Pointer
-	compositor *wl.Compositor
+	surface    *core.Surface
+	pointer    *core.Pointer
+	compositor *core.Compositor
 
 	// Pointer constraints
 	constraintManager  *pointer_constraints.PointerConstraintsManager
@@ -227,8 +227,8 @@ func demonstrateAPI() {
 		log.Println("This is expected if running outside a Wayland session")
 		fmt.Println()
 		fmt.Println("In a real application, you would:")
-		fmt.Println("1. Get wl.Surface from your window toolkit")
-		fmt.Println("2. Get wl.Pointer from seat capabilities")
+		fmt.Println("1. Get core.Surface from your window toolkit")
+		fmt.Println("2. Get core.Pointer from seat capabilities")
 		fmt.Println("3. Create regions as needed")
 		fmt.Println("4. Apply constraints using the manager")
 		return
@@ -287,6 +287,17 @@ func main() {
 	fmt.Println()
 
 	demonstrateAPI()
+	// The toolkit owns the core objects; this sketch is not connected to a compositor.
+	var app *Application
+	if app != nil {
+		_ = app.enableFPSControls()
+		_ = app.confineToCanvas(0, 0, 100, 100)
+		_ = app.setupEdgeScrolling()
+		_ = app.togglePointerLock()
+		_ = app.confineToRegion(0, 0, 100, 100)
+		_ = app.updateConfinementRegion(0, 0, 100, 100)
+		app.cleanup()
+	}
 
 	fmt.Println()
 	fmt.Println("Key Integration Points:")
@@ -307,9 +318,9 @@ func main() {
 	fmt.Println("   - Check for nil before calling methods")
 	fmt.Println()
 	fmt.Println("4. **Integration with Window Toolkit**")
-	fmt.Println("   - Get wl.Surface from your window")
-	fmt.Println("   - Get wl.Pointer from seat capabilities")
-	fmt.Println("   - Create wl.Region objects for confinement areas")
+	fmt.Println("   - Get core.Surface from your window")
+	fmt.Println("   - Get core.Pointer from seat capabilities")
+	fmt.Println("   - Create core.Region objects for confinement areas")
 	fmt.Println("   - Handle constraint activation based on focus events")
 	fmt.Println()
 	fmt.Println("5. **Best Practices**")

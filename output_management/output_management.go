@@ -130,8 +130,6 @@ func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 	// fmt.Println("[DEBUG] Client created successfully")
 
 	// Check if output manager protocol is available using the client's detection
-	// fmt.Printf("[DEBUG] Checking HasOutputManager: %v\n", c.HasOutputManager())
-	// fmt.Printf("[DEBUG] OutputManagerName: %d\n", c.GetOutputManagerName())
 	if !c.HasOutputManager() {
 		c.Close()
 		return nil, fmt.Errorf("zwlr_output_manager_v1 not available - compositor may not support wlr-output-management protocol")
@@ -144,26 +142,24 @@ func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 		serialCh: make(chan struct{}, 1),
 	}
 
-	// Use the output manager name from the client
-	managerName := c.GetOutputManagerName()
 	registry := c.GetRegistry()
 	context := c.GetContext()
-	// fmt.Printf("[DEBUG] Output manager name: %d\n", managerName)
 
 	// Create and bind output manager
 	om.manager = protocols.NewOutputManager(context)
 	// fmt.Printf("[DEBUG] Created output manager proxy with ID: %d\n", om.manager.ID())
 
-	err := registry.Bind(managerName, protocols.OutputManagerInterface, 4, om.manager)
+	_, err := registry.BindNegotiated(protocols.OutputManagerInterface, 4, om.manager)
 	if err != nil {
+		_ = c.Close()
 		return nil, fmt.Errorf("failed to bind output manager: %w", err)
 	}
 	// fmt.Printf("[DEBUG] Bound to output manager successfully, ID: %d\n", om.manager.ID())
 
 	// Set up event handlers
-	om.manager.SetHeadHandler(om.handleHead)
-	om.manager.SetDoneHandler(om.handleDone)
-	om.manager.SetFinishedHandler(om.handleFinished)
+	om.manager.OnHead(om.handleHead)
+	om.manager.OnDone(om.handleDone)
+	om.manager.OnFinished(om.handleFinished)
 	// fmt.Println("[DEBUG] Event handlers set up")
 
 	// Fetch the initial output configuration before starting the background
@@ -317,7 +313,6 @@ func (om *OutputManager) Close() error {
 
 	if om.manager != nil {
 		_ = om.manager.Stop()
-		_ = om.manager.Destroy()
 	}
 
 	if om.client != nil {
@@ -348,43 +343,43 @@ func (om *OutputManager) handleHead(head *protocols.OutputHead) {
 	}
 
 	// Set up head event handlers
-	head.SetNameHandler(func(name string) {
+	head.OnName(func(name string) {
 		om.mu.Lock()
 		outputHead.Name = name
 		om.mu.Unlock()
 	})
 
-	head.SetDescriptionHandler(func(description string) {
+	head.OnDescription(func(description string) {
 		outputHead.Description = description
 	})
 
-	head.SetPhysicalSizeHandler(func(width, height int32) {
+	head.OnPhysicalSize(func(width, height int32) {
 		outputHead.PhysicalSize = Size{Width: width, Height: height}
 	})
 
-	head.SetEnabledHandler(func(enabled int32) {
+	head.OnEnabled(func(enabled int32) {
 		outputHead.Enabled = enabled != 0
 	})
 
-	head.SetPositionHandler(func(x, y int32) {
+	head.OnPosition(func(x, y int32) {
 		outputHead.Position = Position{X: x, Y: y}
 	})
 
-	head.SetModeHandler(func(mode *protocols.OutputMode) {
+	head.OnMode(func(mode *protocols.OutputMode) {
 		om := &OutputMode{
 			mode: mode,
 		}
 
-		mode.SetSizeHandler(func(width, height int32) {
+		mode.OnSize(func(width, height int32) {
 			om.Width = width
 			om.Height = height
 		})
 
-		mode.SetRefreshHandler(func(refresh int32) {
+		mode.OnRefresh(func(refresh int32) {
 			om.Refresh = refresh
 		})
 
-		mode.SetPreferredHandler(func() {
+		mode.OnPreferred(func() {
 			om.Preferred = true
 			// The preferred event always follows the mode event, so the default
 			// mode is selected here rather than when the mode is created.
@@ -401,10 +396,10 @@ func (om *OutputManager) handleHead(head *protocols.OutputHead) {
 		}
 	})
 
-	head.SetCurrentModeHandler(func(mode *protocols.OutputMode) {
+	head.OnCurrentMode(func(modeID uint32) {
 		// Find the mode in our list
 		for _, m := range outputHead.modes {
-			if m.mode == mode {
+			if m.mode.ID() == modeID {
 				outputHead.CurrentMode = m
 				outputHead.Mode = m
 				break
@@ -412,30 +407,30 @@ func (om *OutputManager) handleHead(head *protocols.OutputHead) {
 		}
 	})
 
-	head.SetScaleHandler(func(scale wl.Fixed) {
+	head.OnScale(func(scale wl.Fixed) {
 		outputHead.Scale = float64(scale) / 256.0
 		if outputHead.Scale == 0 {
 			outputHead.Scale = 1.0 // Default to 1.0 if not set
 		}
 	})
 
-	head.SetTransformHandler(func(transform int32) {
+	head.OnTransform(func(transform int32) {
 		outputHead.Transform = Transform(transform)
 	})
 
-	head.SetMakeHandler(func(makeStr string) {
+	head.OnMake(func(makeStr string) {
 		outputHead.Make = makeStr
 	})
 
-	head.SetModelHandler(func(model string) {
+	head.OnModel(func(model string) {
 		outputHead.Model = model
 	})
 
-	head.SetSerialNumberHandler(func(serial string) {
+	head.OnSerialNumber(func(serial string) {
 		outputHead.SerialNumber = serial
 	})
 
-	head.SetFinishedHandler(func() {
+	head.OnFinished(func() {
 		// Head is being removed
 		om.mu.Lock()
 		delete(om.heads, outputHead.ID)
