@@ -13,6 +13,12 @@ cleanup() {
   trap - EXIT INT TERM
   if [[ -n "$PID" ]]; then
     kill -- -"$PID" 2>/dev/null || true
+    # Bound cleanup if the compositor ignores TERM; never leave its process group.
+    for ((j=0;j<20;j++)); do
+      if ! kill -0 "$PID" 2>/dev/null; then break; fi
+      sleep .05
+    done
+    if kill -0 "$PID" 2>/dev/null; then kill -KILL -- -"$PID" 2>/dev/null || true; fi
     wait "$PID" 2>/dev/null || true
   fi
   if [[ $result -ne 0 && -f "$TMP/neferwl.log" ]]; then cat "$TMP/neferwl.log" >&2; fi
