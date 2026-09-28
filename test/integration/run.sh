@@ -25,7 +25,10 @@ cleanup() {
   rm -rf -- "$TMP"
   exit "$result"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+# An interrupted run must never report success.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 cp "$ROOT"/test/consumer/{go.mod,go.sum,fixture.go,main.go} "$TMP"/
 (
   cd "$TMP"
@@ -33,9 +36,9 @@ cp "$ROOT"/test/consumer/{go.mod,go.sum,fixture.go,main.go} "$TMP"/
   GOWORK=off go mod tidy
   CGO_ENABLED=0 GOWORK=off go build -o consumer .
 )
-mkdir -m 700 "$TMP/runtime" "$TMP/config"
+mkdir -m 700 "$TMP/runtime" "$TMP/config" "$TMP/cache"
 # No host display or Wayland socket leaks into this session.
-env -u DISPLAY -u WAYLAND_DISPLAY XDG_RUNTIME_DIR="$TMP/runtime" XDG_CONFIG_HOME="$TMP/config" \
+env -u DISPLAY -u WAYLAND_DISPLAY XDG_RUNTIME_DIR="$TMP/runtime" XDG_CONFIG_HOME="$TMP/config" XDG_CACHE_HOME="$TMP/cache" \
   setsid "$LIBWLDEVICES_HEADLESS" --backend=headless --no-terminal --no-xwayland \
   --size 640x480 --timeout 20s >"$TMP/neferwl.log" 2>&1 &
 PID=$!
@@ -44,7 +47,8 @@ for ((i=0;i<100;i++)); do
   if ! kill -0 "$PID" 2>/dev/null; then echo 'compositor exited before socket readiness' >&2; exit 1; fi
   for socket in "$TMP"/runtime/wayland-*; do
     if [[ -S "$socket" ]]; then
-      env -u DISPLAY XDG_RUNTIME_DIR="$TMP/runtime" WAYLAND_DISPLAY="$(basename "$socket")" \
+      env -u DISPLAY XDG_RUNTIME_DIR="$TMP/runtime" XDG_CONFIG_HOME="$TMP/config" XDG_CACHE_HOME="$TMP/cache" \
+        WAYLAND_DISPLAY="$(basename "$socket")" \
         timeout 15s "$TMP/consumer"
       exit
     fi
