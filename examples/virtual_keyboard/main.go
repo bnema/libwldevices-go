@@ -67,6 +67,7 @@ func main() {
 		}
 	}()
 
+	_ = demonstrateAdvancedFeatures // Optional walkthrough; basic example exercises common actions.
 	// Create a virtual keyboard
 	fmt.Println("2. Creating virtual keyboard...")
 	keyboard, err := manager.CreateKeyboard()

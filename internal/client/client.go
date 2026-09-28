@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/bnema/wlturbo/protocol/core"
 	"github.com/bnema/wlturbo/wl"
 )
 
@@ -12,7 +13,7 @@ import (
 type Client struct {
 	display  *wl.Display
 	registry *wl.Registry
-	seat     *wl.Seat
+	seat     *core.Seat
 	context  *wl.Context
 
 	// Protocol globals
@@ -52,6 +53,7 @@ func NewClient() (*Client, error) {
 	// Now do a roundtrip to get all globals announced
 	// fmt.Println("[DEBUG] Performing roundtrip to get globals...")
 	if err := display.Roundtrip(); err != nil {
+		_ = display.Close()
 		return nil, fmt.Errorf("failed to get initial globals: %w", err)
 	}
 	// fmt.Println("[DEBUG] Roundtrip completed, globals should be announced")
@@ -79,11 +81,8 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 	switch event.Interface {
 	case "wl_seat":
 		// Bind to seat for virtual input
-		seatID, err := c.registry.BindID(event.Name, event.Interface, event.Version)
-		if err == nil {
-			seat := wl.NewSeat(c.context)
-			seat.SetID(seatID)
-			c.context.Register(seat)
+		seat := core.NewSeat(c.context)
+		if _, err := c.registry.BindNegotiated("wl_seat", 7, seat); err == nil {
 			c.seat = seat
 		}
 
@@ -143,7 +142,7 @@ func (c *Client) GetContext() *wl.Context {
 }
 
 // GetSeat returns the Wayland seat
-func (c *Client) GetSeat() *wl.Seat {
+func (c *Client) GetSeat() *core.Seat {
 	return c.seat
 }
 

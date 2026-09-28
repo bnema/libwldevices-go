@@ -244,7 +244,7 @@ func (m *VirtualKeyboardManager) CreateKeyboard() (*VirtualKeyboard, error) {
 
 // setDefaultKeymap sets a minimal default keymap
 func (k *VirtualKeyboard) setDefaultKeymap() error {
-	fd, size, err := protocols.CreateDefaultKeymap()
+	fd, size, err := createDefaultKeymap()
 	if err != nil {
 		return err
 	}
@@ -252,22 +252,17 @@ func (k *VirtualKeyboard) setDefaultKeymap() error {
 	// Send the keymap
 	err = k.keyboard.Keymap(KEYMAP_FORMAT_XKB_V1, fd, size)
 	if err != nil {
-		syscall.Close(fd)
+		_ = syscall.Close(fd)
 		return err
 	}
 
 	k.keymapSet = true
-
-	// Don't close the FD - the compositor needs to read it
-	// The compositor will close it when done
 
 	// Do a roundtrip to ensure the keymap is processed
 	err = k.client.GetDisplay().Roundtrip()
 	if err != nil {
 		return fmt.Errorf("failed to roundtrip after keymap: %w", err)
 	}
-
-	// Note: FD is closed by the compositor after reading
 
 	return nil
 }
@@ -298,9 +293,7 @@ func (k *VirtualKeyboard) Close() error {
 
 // Close releases the virtual keyboard manager
 func (m *VirtualKeyboardManager) Close() error {
-	if m.manager != nil {
-		_ = m.manager.Destroy()
-	}
+	// The protocol defines no manager destructor; closing the connection retires it.
 	if m.client != nil {
 		return m.client.Close()
 	}

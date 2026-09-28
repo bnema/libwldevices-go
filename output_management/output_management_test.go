@@ -782,6 +782,7 @@ func pushHeadAndDone(srv *testcompositor.Server) error {
 		{testModeObjectID, 0, []any{int32(1920), int32(1200)}}, // mode size
 		{testModeObjectID, 1, []any{int32(59997)}},             // mode refresh
 		{testModeObjectID, 2, []any{}},                         // mode preferred
+		{testHeadObjectID, 5, []any{uint32(testModeObjectID)}}, // current_mode
 		{testHeadObjectID, 4, []any{int32(1)}},                 // enabled
 		{testHeadObjectID, 6, []any{int32(100), int32(50)}},    // position
 		{testHeadObjectID, 7, []any{int32(TransformNormal)}},   // transform
@@ -930,6 +931,9 @@ func TestInitialConfigurationIsParsedFromEvents(t *testing.T) {
 	}
 	if head.Mode != mode {
 		t.Errorf("head.Mode = %p, want the preferred mode %p", head.Mode, mode)
+	}
+	if head.CurrentMode != mode {
+		t.Errorf("head.CurrentMode = %p, want the generated mode %p", head.CurrentMode, mode)
 	}
 
 	if !manager.hasSerial || manager.serial != testSerial {
