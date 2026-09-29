@@ -40,10 +40,7 @@ func NewPointerConstraints(ctx *wl.Context) *PointerConstraints {
 
 // Used by the client to notify the server that it will no longer use this pointer constraints object.
 func (o *PointerConstraints) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwp_pointer_constraints_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -51,9 +48,6 @@ func (o *PointerConstraints) Destroy() error {
 
 // The lock_pointer request lets the client request to disable movements of the virtual pointer (i.e. the cursor), effectively locking the pointer to a position. This request may not take effect immediately; in the future, when the compositor deems implementation-specific constraints are satisfied, the pointer lock will be activated and the compositor sends a locked event. The protocol provides no guarantee that the constraints are ever satisfied, and does not require the compositor to send an error if the constraints cannot ever be satisfied. It is thus possible to request a lock that will never activate. There may not be another pointer constraint of any kind requested or active on the surface for any of the wl_pointer objects of the seat of the passed pointer when requesting a lock. If there is, an error will be raised. See general pointer lock documentation for more details. The intersection of the region passed with this request and the input region of the surface is used to determine where the pointer must be in order for the lock to activate. It is up to the compositor whether to warp the pointer or require some kind of user interaction for the lock to activate. If the region is null the surface input region is used. A surface may receive pointer focus without the lock being activated. The request creates a new object wp_locked_pointer which is used to interact with the lock as well as receive updates about its state. See the the description of wp_locked_pointer for further information. Note that while a pointer is locked, the wl_pointer objects of the corresponding seat will not emit any wl_pointer.motion events, but relative motion events will still be emitted via wp_relative_pointer objects of the same seat. wl_pointer.axis and wl_pointer.button events are unaffected.
 func (o *PointerConstraints) LockPointer(surface *cross_wl_surface.Surface, pointer *cross_wl_pointer.Pointer, region *cross_wl_region.Region, lifetime uint32) (*LockedPointer, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	var arg1 wl.Object
 	if surface != nil {
 		arg1 = surface
@@ -68,10 +62,7 @@ func (o *PointerConstraints) LockPointer(surface *cross_wl_surface.Surface, poin
 	}
 	child := &LockedPointer{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 1, child, arg1, arg2, arg3, lifetime); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwp_pointer_constraints_v1.lock_pointer", Child: child}, child, arg1, arg2, arg3, lifetime); err != nil {
 		return nil, err
 	}
 	return child, nil
@@ -79,9 +70,6 @@ func (o *PointerConstraints) LockPointer(surface *cross_wl_surface.Surface, poin
 
 // The confine_pointer request lets the client request to confine the pointer cursor to a given region. This request may not take effect immediately; in the future, when the compositor deems implementation- specific constraints are satisfied, the pointer confinement will be activated and the compositor sends a confined event. The intersection of the region passed with this request and the input region of the surface is used to determine where the pointer must be in order for the confinement to activate. It is up to the compositor whether to warp the pointer or require some kind of user interaction for the confinement to activate. If the region is null the surface input region is used. The request will create a new object wp_confined_pointer which is used to interact with the confinement as well as receive updates about its state. See the the description of wp_confined_pointer for further information.
 func (o *PointerConstraints) ConfinePointer(surface *cross_wl_surface.Surface, pointer *cross_wl_pointer.Pointer, region *cross_wl_region.Region, lifetime uint32) (*ConfinedPointer, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	var arg1 wl.Object
 	if surface != nil {
 		arg1 = surface
@@ -96,10 +84,7 @@ func (o *PointerConstraints) ConfinePointer(surface *cross_wl_surface.Surface, p
 	}
 	child := &ConfinedPointer{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 2, child, arg1, arg2, arg3, lifetime); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 2, Name: "zwp_pointer_constraints_v1.confine_pointer", Child: child}, child, arg1, arg2, arg3, lifetime); err != nil {
 		return nil, err
 	}
 	return child, nil
@@ -143,10 +128,7 @@ func NewLockedPointer(ctx *wl.Context) *LockedPointer {
 
 // Destroy the locked pointer object. If applicable, the compositor will unlock the pointer.
 func (o *LockedPointer) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwp_locked_pointer_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -154,10 +136,7 @@ func (o *LockedPointer) Destroy() error {
 
 // Set the cursor position hint relative to the top left corner of the surface. If the client is drawing its own cursor, it should update the position hint to the position of its own cursor. A compositor may use this information to warp the pointer upon unlock in order to avoid pointer jumps. The cursor position hint is double-buffered state, see wl_surface.commit.
 func (o *LockedPointer) SetCursorPositionHint(surfaceX wl.Fixed, surfaceY wl.Fixed) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 1, surfaceX, surfaceY); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwp_locked_pointer_v1.set_cursor_position_hint"}, surfaceX, surfaceY); err != nil {
 		return err
 	}
 	return nil
@@ -165,14 +144,11 @@ func (o *LockedPointer) SetCursorPositionHint(surfaceX wl.Fixed, surfaceY wl.Fix
 
 // Set a new region used to lock the pointer. The new lock region is double-buffered, see wl_surface.commit. For details about the lock region, see wp_locked_pointer.
 func (o *LockedPointer) SetRegion(region *cross_wl_region.Region) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
 	var arg0 wl.Object
 	if region != nil {
 		arg0 = region
 	}
-	if err := o.Context().SendRequest(o, 2, arg0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 2, Name: "zwp_locked_pointer_v1.set_region"}, arg0); err != nil {
 		return err
 	}
 	return nil
@@ -276,10 +252,7 @@ func NewConfinedPointer(ctx *wl.Context) *ConfinedPointer {
 
 // Destroy the confined pointer object. If applicable, the compositor will unconfine the pointer.
 func (o *ConfinedPointer) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwp_confined_pointer_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -287,14 +260,11 @@ func (o *ConfinedPointer) Destroy() error {
 
 // Set a new region used to confine the pointer. The new confine region is double-buffered, see wl_surface.commit. If the confinement is active when the new confinement region is applied and the pointer ends up outside of newly applied region, the pointer may warped to a position within the new confinement region. If warped, a wl_pointer.motion event will be emitted, but no wp_relative_pointer.relative_motion event. The compositor may also, instead of using the new region, unconfine the pointer. For details about the confine region, see wp_confined_pointer.
 func (o *ConfinedPointer) SetRegion(region *cross_wl_region.Region) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
 	var arg0 wl.Object
 	if region != nil {
 		arg0 = region
 	}
-	if err := o.Context().SendRequest(o, 1, arg0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwp_confined_pointer_v1.set_region"}, arg0); err != nil {
 		return err
 	}
 	return nil

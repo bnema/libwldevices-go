@@ -67,15 +67,9 @@ func NewOutputManager(ctx *wl.Context) *OutputManager {
 
 // Create a new output configuration object. This allows to update head properties.
 func (o *OutputManager) CreateConfiguration(serial uint32) (*OutputConfiguration, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	child := &OutputConfiguration{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 0, child, serial); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwlr_output_manager_v1.create_configuration", Child: child}, child, serial); err != nil {
 		return nil, err
 	}
 	return child, nil
@@ -83,10 +77,7 @@ func (o *OutputManager) CreateConfiguration(serial uint32) (*OutputConfiguration
 
 // Indicates the client no longer wishes to receive events for output configuration changes. However the compositor may emit further events, until the finished event is emitted. The client must not send any more requests after this one.
 func (o *OutputManager) Stop() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 1); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwlr_output_manager_v1.stop"}); err != nil {
 		return err
 	}
 	return nil
@@ -180,6 +171,7 @@ func (o *OutputManager) Dispatch(event *wl.Event) {
 		headObject := &OutputHead{}
 		headObject.SetContext(o.Context())
 		headObject.SetID(headID)
+		headObject.SetVersion(o.Version())
 		o.Context().Register(headObject)
 
 		for i, handler := range o.handlersForHead() {
@@ -239,10 +231,7 @@ func NewOutputHead(ctx *wl.Context) *OutputHead {
 
 // This request indicates that the client will no longer use this head object.
 func (o *OutputHead) Release() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwlr_output_head_v1.release", Since: 3, Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -622,6 +611,7 @@ func (o *OutputHead) Dispatch(event *wl.Event) {
 		modeObject := &OutputMode{}
 		modeObject.SetContext(o.Context())
 		modeObject.SetID(modeID)
+		modeObject.SetVersion(o.Version())
 		o.Context().Register(modeObject)
 
 		for i, handler := range o.handlersForMode() {
@@ -727,10 +717,7 @@ func NewOutputMode(ctx *wl.Context) *OutputMode {
 
 // This request indicates that the client will no longer use this mode object.
 func (o *OutputMode) Release() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwlr_output_mode_v1.release", Since: 3, Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -898,19 +885,13 @@ func NewOutputConfiguration(ctx *wl.Context) *OutputConfiguration {
 
 // Enable a head. This request creates a head configuration object that can be used to change the head's properties.
 func (o *OutputConfiguration) EnableHead(head *OutputHead) (*OutputConfigurationHead, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	var arg1 wl.Object
 	if head != nil {
 		arg1 = head
 	}
 	child := &OutputConfigurationHead{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 0, child, arg1); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwlr_output_configuration_v1.enable_head", Child: child}, child, arg1); err != nil {
 		return nil, err
 	}
 	return child, nil
@@ -918,14 +899,11 @@ func (o *OutputConfiguration) EnableHead(head *OutputHead) (*OutputConfiguration
 
 // Disable a head.
 func (o *OutputConfiguration) DisableHead(head *OutputHead) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
 	var arg0 wl.Object
 	if head != nil {
 		arg0 = head
 	}
-	if err := o.Context().SendRequest(o, 1, arg0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwlr_output_configuration_v1.disable_head"}, arg0); err != nil {
 		return err
 	}
 	return nil
@@ -933,10 +911,7 @@ func (o *OutputConfiguration) DisableHead(head *OutputHead) error {
 
 // Apply the new output configuration. In case the configuration is successfully applied, there is no guarantee that the new output state matches completely the requested configuration. For instance, a compositor might round the scale if it doesn't support fractional scaling. After this request has been sent, the compositor must respond with an succeeded, failed or cancelled event. Sending a request that isn't the destructor is a protocol error.
 func (o *OutputConfiguration) Apply() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 2); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 2, Name: "zwlr_output_configuration_v1.apply"}); err != nil {
 		return err
 	}
 	return nil
@@ -944,10 +919,7 @@ func (o *OutputConfiguration) Apply() error {
 
 // Test the new output configuration. The configuration won't be applied, but will only be validated. Even if the compositor succeeds to test a configuration, applying it may fail. After this request has been sent, the compositor must respond with an succeeded, failed or cancelled event. Sending a request that isn't the destructor is a protocol error.
 func (o *OutputConfiguration) Test() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 3); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 3, Name: "zwlr_output_configuration_v1.test"}); err != nil {
 		return err
 	}
 	return nil
@@ -955,10 +927,7 @@ func (o *OutputConfiguration) Test() error {
 
 // Using this request a client can tell the compositor that it is not going to use the configuration object anymore. Any changes to the outputs that have not been applied will be discarded. This request also destroys wlr_output_configuration_head objects created via this object.
 func (o *OutputConfiguration) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 4); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 4, Name: "zwlr_output_configuration_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -1087,14 +1056,11 @@ func NewOutputConfigurationHead(ctx *wl.Context) *OutputConfigurationHead {
 
 // This request sets the head's mode.
 func (o *OutputConfigurationHead) SetMode(mode *OutputMode) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
 	var arg0 wl.Object
 	if mode != nil {
 		arg0 = mode
 	}
-	if err := o.Context().SendRequest(o, 0, arg0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwlr_output_configuration_head_v1.set_mode"}, arg0); err != nil {
 		return err
 	}
 	return nil
@@ -1102,10 +1068,7 @@ func (o *OutputConfigurationHead) SetMode(mode *OutputMode) error {
 
 // This request assigns a custom mode to the head. The size is given in physical hardware units of the output device. If set to zero, the refresh rate is unspecified. It is a protocol error to set both a mode and a custom mode.
 func (o *OutputConfigurationHead) SetCustomMode(width int32, height int32, refresh int32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 1, width, height, refresh); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwlr_output_configuration_head_v1.set_custom_mode"}, width, height, refresh); err != nil {
 		return err
 	}
 	return nil
@@ -1113,10 +1076,7 @@ func (o *OutputConfigurationHead) SetCustomMode(width int32, height int32, refre
 
 // This request sets the head's position in the global compositor space.
 func (o *OutputConfigurationHead) SetPosition(x int32, y int32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 2, x, y); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 2, Name: "zwlr_output_configuration_head_v1.set_position"}, x, y); err != nil {
 		return err
 	}
 	return nil
@@ -1124,10 +1084,7 @@ func (o *OutputConfigurationHead) SetPosition(x int32, y int32) error {
 
 // This request sets the head's transform.
 func (o *OutputConfigurationHead) SetTransform(transform int32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 3, transform); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 3, Name: "zwlr_output_configuration_head_v1.set_transform"}, transform); err != nil {
 		return err
 	}
 	return nil
@@ -1135,10 +1092,7 @@ func (o *OutputConfigurationHead) SetTransform(transform int32) error {
 
 // This request sets the head's scale.
 func (o *OutputConfigurationHead) SetScale(scale wl.Fixed) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 4, scale); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 4, Name: "zwlr_output_configuration_head_v1.set_scale"}, scale); err != nil {
 		return err
 	}
 	return nil
@@ -1146,10 +1100,7 @@ func (o *OutputConfigurationHead) SetScale(scale wl.Fixed) error {
 
 // This request enables/disables adaptive sync. Adaptive sync is also known as Variable Refresh Rate or VRR.
 func (o *OutputConfigurationHead) SetAdaptiveSync(state uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 5, state); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 5, Name: "zwlr_output_configuration_head_v1.set_adaptive_sync", Since: 4}, state); err != nil {
 		return err
 	}
 	return nil
