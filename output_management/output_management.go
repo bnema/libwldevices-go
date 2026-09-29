@@ -95,8 +95,6 @@ const (
 
 // NewOutputManager creates a new output manager
 func NewOutputManager(ctx context.Context) (*OutputManager, error) {
-	// fmt.Println("[DEBUG] Creating output manager...")
-
 	// Check if context is already cancelled
 	select {
 	case <-ctx.Done():
@@ -127,14 +125,12 @@ func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 	case <-ctx.Done():
 		return nil, fmt.Errorf("context cancelled during client creation: %w", ctx.Err())
 	}
-	// fmt.Println("[DEBUG] Client created successfully")
 
 	// Check if output manager protocol is available using the client's detection
 	if !c.HasOutputManager() {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("zwlr_output_manager_v1 not available - compositor may not support wlr-output-management protocol")
 	}
-	// fmt.Println("[DEBUG] Output manager protocol is available")
 
 	om := &OutputManager{
 		client:   c,
@@ -147,20 +143,17 @@ func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 
 	// Create and bind output manager
 	om.manager = protocols.NewOutputManager(context)
-	// fmt.Printf("[DEBUG] Created output manager proxy with ID: %d\n", om.manager.ID())
 
 	_, err := registry.BindNegotiated(protocols.OutputManagerInterface, 4, om.manager)
 	if err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("failed to bind output manager: %w", err)
 	}
-	// fmt.Printf("[DEBUG] Bound to output manager successfully, ID: %d\n", om.manager.ID())
 
 	// Set up event handlers
 	om.manager.OnHead(om.handleHead)
 	om.manager.OnDone(om.handleDone)
 	om.manager.OnFinished(om.handleFinished)
-	// fmt.Println("[DEBUG] Event handlers set up")
 
 	// Fetch the initial output configuration before starting the background
 	// dispatcher. Two goroutines must never read the connection concurrently:
@@ -173,24 +166,19 @@ func NewOutputManager(ctx context.Context) (*OutputManager, error) {
 
 	// Start event processing in background
 	go func() {
-		// fmt.Println("[DEBUG] Starting event dispatch loop...")
 		for {
 			if err := c.GetDisplay().Dispatch(); err != nil {
 				// Connection closed or error occurred
-				// fmt.Printf("[DEBUG] Dispatch error: %v\n", err)
 				return
 			}
 		}
 	}()
 
 	// Wait for initial configuration to be received with context support
-	// fmt.Println("[DEBUG] Waiting for initial configuration...")
 	select {
 	case <-om.serialCh:
 		// Initial configuration received
-		// fmt.Println("[DEBUG] Initial configuration received")
 	case <-time.After(5 * time.Second):
-		// fmt.Println("[DEBUG] Timeout waiting for initial configuration")
 		_ = om.Close()
 		return nil, fmt.Errorf("timeout waiting for initial output configuration")
 	case <-ctx.Done():
@@ -324,7 +312,6 @@ func (om *OutputManager) Close() error {
 
 // Event handlers
 func (om *OutputManager) handleHead(head *protocols.OutputHead) {
-	// fmt.Printf("[DEBUG] handleHead called with head ID: %d\n", head.ID())
 	if head == nil {
 		return
 	}
@@ -446,7 +433,6 @@ func (om *OutputManager) handleHead(head *protocols.OutputHead) {
 }
 
 func (om *OutputManager) handleDone(serial uint32) {
-	// fmt.Printf("[DEBUG] handleDone called with serial: %d\n", serial)
 	om.mu.Lock()
 	isFirst := !om.hasSerial
 	om.serial = serial
@@ -479,7 +465,6 @@ func (om *OutputManager) handleDone(serial uint32) {
 }
 
 func (om *OutputManager) handleFinished() {
-	// fmt.Println("[DEBUG] handleFinished called")
 	// Manager is being destroyed
 	om.mu.Lock()
 	defer om.mu.Unlock()
