@@ -179,7 +179,7 @@ func NewVirtualKeyboardManager(ctx context.Context) (*VirtualKeyboardManager, er
 
 	// Check if virtual keyboard protocol is available
 	if !c.HasVirtualKeyboard() {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("zwp_virtual_keyboard_manager_v1 not available")
 	}
 
@@ -204,7 +204,7 @@ func NewVirtualKeyboardManager(ctx context.Context) (*VirtualKeyboardManager, er
 
 	// Sync to ensure binding is complete
 	if err := c.GetDisplay().Roundtrip(); err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, fmt.Errorf("failed to roundtrip after binding: %w", err)
 	}
 

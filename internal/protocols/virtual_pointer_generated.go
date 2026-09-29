@@ -34,10 +34,7 @@ func NewVirtualPointer(ctx *wl.Context) *VirtualPointer {
 
 // The pointer has moved by a relative amount to the previous request. Values are in the global compositor space.
 func (o *VirtualPointer) Motion(time uint32, dx wl.Fixed, dy wl.Fixed) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 0, time, dx, dy); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwlr_virtual_pointer_v1.motion"}, time, dx, dy); err != nil {
 		return err
 	}
 	return nil
@@ -45,10 +42,7 @@ func (o *VirtualPointer) Motion(time uint32, dx wl.Fixed, dy wl.Fixed) error {
 
 // The pointer has moved in an absolute coordinate frame. Value of x can range from 0 to x_extent, value of y can range from 0 to y_extent.
 func (o *VirtualPointer) MotionAbsolute(time uint32, x uint32, y uint32, xExtent uint32, yExtent uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 1, time, x, y, xExtent, yExtent); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwlr_virtual_pointer_v1.motion_absolute"}, time, x, y, xExtent, yExtent); err != nil {
 		return err
 	}
 	return nil
@@ -56,10 +50,7 @@ func (o *VirtualPointer) MotionAbsolute(time uint32, x uint32, y uint32, xExtent
 
 // A button was pressed or released.
 func (o *VirtualPointer) Button(time uint32, button uint32, state uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 2, time, button, state); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 2, Name: "zwlr_virtual_pointer_v1.button"}, time, button, state); err != nil {
 		return err
 	}
 	return nil
@@ -67,10 +58,7 @@ func (o *VirtualPointer) Button(time uint32, button uint32, state uint32) error 
 
 // Scroll and other axis requests.
 func (o *VirtualPointer) Axis(time uint32, axis uint32, value wl.Fixed) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 3, time, axis, value); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 3, Name: "zwlr_virtual_pointer_v1.axis"}, time, axis, value); err != nil {
 		return err
 	}
 	return nil
@@ -78,10 +66,7 @@ func (o *VirtualPointer) Axis(time uint32, axis uint32, value wl.Fixed) error {
 
 // Indicates the set of events that logically belong together.
 func (o *VirtualPointer) Frame() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 4); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 4, Name: "zwlr_virtual_pointer_v1.frame"}); err != nil {
 		return err
 	}
 	return nil
@@ -89,10 +74,7 @@ func (o *VirtualPointer) Frame() error {
 
 // Source information for scroll and other axis.
 func (o *VirtualPointer) AxisSource(axisSource uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 5, axisSource); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 5, Name: "zwlr_virtual_pointer_v1.axis_source"}, axisSource); err != nil {
 		return err
 	}
 	return nil
@@ -100,10 +82,7 @@ func (o *VirtualPointer) AxisSource(axisSource uint32) error {
 
 // Stop notification for scroll and other axes.
 func (o *VirtualPointer) AxisStop(time uint32, axis uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 6, time, axis); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 6, Name: "zwlr_virtual_pointer_v1.axis_stop"}, time, axis); err != nil {
 		return err
 	}
 	return nil
@@ -111,10 +90,7 @@ func (o *VirtualPointer) AxisStop(time uint32, axis uint32) error {
 
 // Discrete step information for scroll and other axes. This event allows the client to extend data normally sent using the axis event with discrete value.
 func (o *VirtualPointer) AxisDiscrete(time uint32, axis uint32, value wl.Fixed, discrete int32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 7, time, axis, value, discrete); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 7, Name: "zwlr_virtual_pointer_v1.axis_discrete"}, time, axis, value, discrete); err != nil {
 		return err
 	}
 	return nil
@@ -122,10 +98,7 @@ func (o *VirtualPointer) AxisDiscrete(time uint32, axis uint32, value wl.Fixed, 
 
 // destroy the virtual pointer object
 func (o *VirtualPointer) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 8); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 8, Name: "zwlr_virtual_pointer_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -164,19 +137,13 @@ func NewVirtualPointerManager(ctx *wl.Context) *VirtualPointerManager {
 
 // Creates a new virtual pointer. The optional seat is a suggestion to the compositor.
 func (o *VirtualPointerManager) CreateVirtualPointer(seat *cross_wl_seat.Seat) (*VirtualPointer, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	var arg0 wl.Object
 	if seat != nil {
 		arg0 = seat
 	}
 	child := &VirtualPointer{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 0, arg0, child); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwlr_virtual_pointer_manager_v1.create_virtual_pointer", Child: child}, arg0, child); err != nil {
 		return nil, err
 	}
 	return child, nil
@@ -184,10 +151,7 @@ func (o *VirtualPointerManager) CreateVirtualPointer(seat *cross_wl_seat.Seat) (
 
 // destroy the virtual pointer manager
 func (o *VirtualPointerManager) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 1); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwlr_virtual_pointer_manager_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -195,9 +159,6 @@ func (o *VirtualPointerManager) Destroy() error {
 
 // Creates a new virtual pointer. The seat and the output arguments are optional. If the seat argument is set, the compositor should assign the input device to the requested seat. If the output argument is set, the compositor should map the input device to the requested output.
 func (o *VirtualPointerManager) CreateVirtualPointerWithOutput(seat *cross_wl_seat.Seat, output *cross_wl_output.Output) (*VirtualPointer, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	var arg0 wl.Object
 	if seat != nil {
 		arg0 = seat
@@ -208,10 +169,7 @@ func (o *VirtualPointerManager) CreateVirtualPointerWithOutput(seat *cross_wl_se
 	}
 	child := &VirtualPointer{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 2, arg0, arg1, child); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 2, Name: "zwlr_virtual_pointer_manager_v1.create_virtual_pointer_with_output", Since: 2, Child: child}, arg0, arg1, child); err != nil {
 		return nil, err
 	}
 	return child, nil

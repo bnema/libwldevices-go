@@ -29,12 +29,10 @@ type Client struct {
 
 // NewClient creates a new Wayland client
 func NewClient() (*Client, error) {
-	// fmt.Println("[DEBUG] Connecting to Wayland display...")
 	display, err := wl.Connect("")
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to Wayland: %w", err)
 	}
-	// fmt.Println("[DEBUG] Connected to Wayland display successfully")
 
 	client := &Client{
 		display: display,
@@ -51,27 +49,16 @@ func NewClient() (*Client, error) {
 	registry.AddGlobalRemoveHandler(client)
 
 	// Now do a roundtrip to get all globals announced
-	// fmt.Println("[DEBUG] Performing roundtrip to get globals...")
 	if err := display.Roundtrip(); err != nil {
 		_ = display.Close()
 		return nil, fmt.Errorf("failed to get initial globals: %w", err)
 	}
-	// fmt.Println("[DEBUG] Roundtrip completed, globals should be announced")
-
-	// Debug: print all globals we received
-	// client.mu.Lock()
-	// fmt.Printf("[DEBUG] Received %d globals:\n", len(client.globals))
-	// for name, iface := range client.globals {
-	// 	fmt.Printf("[DEBUG]   - %s (name=%d)\n", iface, name)
-	// }
-	// client.mu.Unlock()
 
 	return client, nil
 }
 
 // HandleRegistryGlobal implements wl.RegistryGlobalHandler
 func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
-	// fmt.Printf("[DEBUG] Global announced: %s v%d (name=%d)\n", event.Interface, event.Version, event.Name)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -99,7 +86,6 @@ func (c *Client) HandleRegistryGlobal(event wl.RegistryGlobalEvent) {
 		c.shortcutsInhibitManager = event.Name
 
 	case "zwlr_output_manager_v1":
-		// fmt.Printf("[DEBUG] Setting outputManager to %d\n", event.Name)
 		c.outputManager = event.Name
 	}
 }

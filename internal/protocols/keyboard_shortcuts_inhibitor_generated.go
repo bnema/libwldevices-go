@@ -33,10 +33,7 @@ func NewKeyboardShortcutsInhibitManager(ctx *wl.Context) *KeyboardShortcutsInhib
 
 // Destroy the keyboard shortcuts inhibitor manager.
 func (o *KeyboardShortcutsInhibitManager) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwp_keyboard_shortcuts_inhibit_manager_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -44,9 +41,6 @@ func (o *KeyboardShortcutsInhibitManager) Destroy() error {
 
 // Create a new keyboard shortcuts inhibitor object associated with the given surface for the given seat. If shortcuts are already inhibited for the specified seat and surface, a protocol error "already_inhibited" is raised by the compositor.
 func (o *KeyboardShortcutsInhibitManager) InhibitShortcuts(surface *cross_wl_surface.Surface, seat *cross_wl_seat.Seat) (*KeyboardShortcutsInhibitor, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	var arg1 wl.Object
 	if surface != nil {
 		arg1 = surface
@@ -57,10 +51,7 @@ func (o *KeyboardShortcutsInhibitManager) InhibitShortcuts(surface *cross_wl_sur
 	}
 	child := &KeyboardShortcutsInhibitor{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 1, child, arg1, arg2); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwp_keyboard_shortcuts_inhibit_manager_v1.inhibit_shortcuts", Child: child}, child, arg1, arg2); err != nil {
 		return nil, err
 	}
 	return child, nil
@@ -104,10 +95,7 @@ func NewKeyboardShortcutsInhibitor(ctx *wl.Context) *KeyboardShortcutsInhibitor 
 
 // Remove the keyboard shortcuts inhibitor from the associated wl_surface.
 func (o *KeyboardShortcutsInhibitor) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 0); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwp_keyboard_shortcuts_inhibitor_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil

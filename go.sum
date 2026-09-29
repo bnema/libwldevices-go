@@ -1,4 +1,4 @@
-github.com/bnema/wlturbo v0.2.1-0.20260928080508-edb855fe4907 h1:dqzW0RvF9pAvP3Or+ICsTW9IE6FeKVB1a7zkbGk/MQk=
-github.com/bnema/wlturbo v0.2.1-0.20260928080508-edb855fe4907/go.mod h1:4i1k1wyw7FDWOkh2hg1ZwPfrPRn3+E6WrYg9Qrt74CA=
+github.com/bnema/wlturbo v0.3.0 h1:Xt5HoiTL/pTVnUjD29mzBsUAVJp+1bxB9DfzxZK6RVA=
+github.com/bnema/wlturbo v0.3.0/go.mod h1:4i1k1wyw7FDWOkh2hg1ZwPfrPRn3+E6WrYg9Qrt74CA=
 golang.org/x/sys v0.33.0 h1:q3i8TbbEz+JRD9ywIRlyRAQbM0qF7hu24q3teo2hbuw=
 golang.org/x/sys v0.33.0/go.mod h1:BJP2sWEmIv4KK5OTEluFJCKSidICx8ciO85XgH3Ak8k=

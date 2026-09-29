@@ -33,22 +33,15 @@ func NewVirtualKeyboard(ctx *wl.Context) *VirtualKeyboard {
 
 // Provide a file descriptor to the compositor which can be memory-mapped to provide a keyboard mapping description. Format carries a value from the keymap_format enumeration.
 func (o *VirtualKeyboard) Keymap(format uint32, fd int, size uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwp_virtual_keyboard_v1.keymap", FDs: []int{fd}}, format, uintptr(fd), size); err != nil {
 		return err
 	}
-	if err := o.Context().SendRequestWithFDs(o, 0, []int{fd}, format, uintptr(fd), size); err != nil {
-		return err
-	}
-	_ = wl.CloseSentFD(fd)
 	return nil
 }
 
 // A key was pressed or released. The time argument is a timestamp with millisecond granularity, with an undefined base. All requests regarding a single object must share the same clock. Keymap must be set before issuing this request. State carries a value from the key_state enumeration.
 func (o *VirtualKeyboard) Key(time uint32, key uint32, state uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 1, time, key, state); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 1, Name: "zwp_virtual_keyboard_v1.key"}, time, key, state); err != nil {
 		return err
 	}
 	return nil
@@ -56,10 +49,7 @@ func (o *VirtualKeyboard) Key(time uint32, key uint32, state uint32) error {
 
 // Notifies the compositor that the modifier and/or group state has changed, and it should update state. The client should use wl_keyboard.modifiers event to synchronize its internal state with seat state. Keymap must be set before issuing this request.
 func (o *VirtualKeyboard) Modifiers(modsDepressed uint32, modsLatched uint32, modsLocked uint32, group uint32) error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendRequest(o, 2, modsDepressed, modsLatched, modsLocked, group); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 2, Name: "zwp_virtual_keyboard_v1.modifiers"}, modsDepressed, modsLatched, modsLocked, group); err != nil {
 		return err
 	}
 	return nil
@@ -67,10 +57,7 @@ func (o *VirtualKeyboard) Modifiers(modsDepressed uint32, modsLatched uint32, mo
 
 // destroy the virtual keyboard keyboard object
 func (o *VirtualKeyboard) Destroy() error {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return err
-	}
-	if err := o.Context().SendDestructor(o, 3); err != nil {
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 3, Name: "zwp_virtual_keyboard_v1.destroy", Destructor: true}); err != nil {
 		return err
 	}
 	return nil
@@ -109,19 +96,13 @@ func NewVirtualKeyboardManager(ctx *wl.Context) *VirtualKeyboardManager {
 
 // Creates a new virtual keyboard associated to a seat. If the compositor enables a keyboard to perform arbitrary actions, it should present an error when an untrusted client requests a new keyboard.
 func (o *VirtualKeyboardManager) CreateVirtualKeyboard(seat *cross_wl_seat.Seat) (*VirtualKeyboard, error) {
-	if err := o.Context().CheckProxy(o); err != nil {
-		return nil, err
-	}
 	var arg0 wl.Object
 	if seat != nil {
 		arg0 = seat
 	}
 	child := &VirtualKeyboard{}
 	child.SetContext(o.Context())
-	child.SetID(o.Context().AllocateID())
-	o.Context().Register(child)
-	if err := o.Context().SendRequest(o, 0, arg0, child); err != nil {
-		o.Context().Unregister(child)
+	if err := o.Context().Request(wl.Request{Proxy: o, Opcode: 0, Name: "zwp_virtual_keyboard_manager_v1.create_virtual_keyboard", Child: child}, arg0, child); err != nil {
 		return nil, err
 	}
 	return child, nil
